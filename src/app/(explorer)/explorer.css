@@ -1381,6 +1381,27 @@
   content: "🚪";
 }
 
+/* Iconos de navegación */
+.nav-link .icon-home::before {
+  content: "🏠";
+}
+
+.nav-link .icon-list::before {
+  content: "📋";
+}
+
+.nav-link .icon-search::before {
+  content: "🔍";
+}
+
+.nav-link .icon-code::before {
+  content: "⚡";
+}
+
+.nav-link .icon-settings::before {
+  content: "⚙️";
+}
+
 .logout-btn {
   color: var(--color-error);
 }

@@ -446,3 +446,156 @@ export function serializeValue(value) {
   }
   return JSON.stringify(value);
 }
+
+// ============================================
+// AUDIT LOG / HISTORY
+// ============================================
+
+const TABLES_HISTORY = {
+  AUDIT_LOG: "audit_log",
+};
+
+/**
+ * Registra una acción en el historial de auditoría
+ */
+export async function logAction(action, {
+  entityType,
+  entityId,
+  userId = null,
+  userName = null,
+  previousData = null,
+  newData = null,
+  metadata = null,
+}) {
+  try {
+    await tablesDB.createRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES_HISTORY.AUDIT_LOG,
+      rowId: "unique()",
+      data: {
+        action, // create, update, delete
+        entity_type: entityType, // entity, claim, qualifier, reference
+        entity_id: entityId,
+        user_id: userId,
+        user_name: userName,
+        previous_data: previousData ? JSON.stringify(previousData) : null,
+        new_data: newData ? JSON.stringify(newData) : null,
+        metadata: metadata ? JSON.stringify(metadata) : null,
+      },
+    });
+  } catch (e) {
+    // Si falla el logging, no interrumpir la operación principal
+    console.error("Error logging action:", e);
+  }
+}
+
+/**
+ * Obtiene el historial de cambios con paginación
+ */
+export async function getAuditLog(limit = 50, offset = 0, filters = {}) {
+  const queries = [
+    Query.limit(limit),
+    Query.offset(offset),
+    Query.orderDesc("$createdAt"),
+  ];
+
+  // Filtrar por tipo de entidad
+  if (filters.entityType) {
+    queries.push(Query.equal("entity_type", filters.entityType));
+  }
+
+  // Filtrar por ID de entidad
+  if (filters.entityId) {
+    queries.push(Query.equal("entity_id", filters.entityId));
+  }
+
+  // Filtrar por usuario
+  if (filters.userId) {
+    queries.push(Query.equal("user_id", filters.userId));
+  }
+
+  // Filtrar por acción
+  if (filters.action) {
+    queries.push(Query.equal("action", filters.action));
+  }
+
+  try {
+    const result = await tablesDB.listRows({
+      databaseId: DATABASE_ID,
+      tableId: TABLES_HISTORY.AUDIT_LOG,
+      queries,
+    });
+
+    return {
+      logs: result.rows.map((row) => ({
+        ...row,
+        previous_data: row.previous_data ? JSON.parse(row.previous_data) : null,
+        new_data: row.new_data ? JSON.parse(row.new_data) : null,
+        metadata: row.metadata ? JSON.parse(row.metadata) : null,
+      })),
+      total: result.total,
+    };
+  } catch (e) {
+    console.error("Error fetching audit log:", e);
+    return { logs: [], total: 0 };
+  }
+}
+
+/**
+ * Obtiene el historial de una entidad específica
+ */
+export async function getEntityHistory(entityId, limit = 20) {
+  return getAuditLog(limit, 0, { entityId });
+}
+
+// ============================================
+// TRANSACTIONS
+// ============================================
+
+/**
+ * Crea una nueva transacción
+ */
+export async function createTransaction() {
+  const tx = await tablesDB.createTransaction();
+  return tx;
+}
+
+/**
+ * Confirma una transacción
+ */
+export async function commitTransaction(transactionId) {
+  await tablesDB.updateTransaction({
+    transactionId,
+    commit: true,
+  });
+}
+
+/**
+ * Revierte una transacción
+ */
+export async function rollbackTransaction(transactionId) {
+  await tablesDB.updateTransaction({
+    transactionId,
+    rollback: true,
+  });
+}
+
+/**
+ * Ejecuta múltiples operaciones en una transacción
+ */
+export async function executeInTransaction(operations) {
+  const tx = await createTransaction();
+  
+  try {
+    await tablesDB.createOperations({
+      transactionId: tx.$id,
+      operations,
+    });
+    
+    await commitTransaction(tx.$id);
+    return { success: true, transactionId: tx.$id };
+  } catch (e) {
+    await rollbackTransaction(tx.$id);
+    throw e;
+  }
+}

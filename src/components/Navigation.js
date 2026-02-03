@@ -4,12 +4,14 @@ import { useState } from "react";
 import Link from "next/link";
 import UserMenu from "./UserMenu";
 import AuthModal from "./AuthModal";
+import { useAuth } from "@/context/AuthContext";
 
 /**
  * Navegación principal del explorador
  */
 export default function Navigation() {
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const { isAdmin } = useAuth();
 
   return (
     <>
@@ -37,6 +39,12 @@ export default function Navigation() {
               <span className="icon-code"></span>
               <span>GraphQL</span>
             </Link>
+            {isAdmin && (
+              <Link href="/admin" className="nav-link">
+                <span className="icon-settings"></span>
+                <span>Admin</span>
+              </Link>
+            )}
           </div>
 
           <div className="nav-user">

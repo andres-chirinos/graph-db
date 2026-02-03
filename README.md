@@ -21,6 +21,81 @@ Clone this repository to your local machine using Git:
 4. **Run the app**<br/>
    Start the project by running `npm run dev`.
 
-## 💡 Additional notes
+## � Database Setup
+
+### Required Tables
+
+The application requires the following tables in your Appwrite TablesDB:
+
+#### `entities`
+| Column | Type | Required |
+|--------|------|----------|
+| label | String | No |
+| description | String | No |
+| aliases | Array | No |
+
+#### `claims`
+| Column | Type | Required |
+|--------|------|----------|
+| subject_id | String | Yes |
+| property_id | String | Yes |
+| value_type | String | Yes |
+| value | String | No |
+| value_entity_id | String | No |
+| rank | String | No |
+
+#### `qualifiers`
+| Column | Type | Required |
+|--------|------|----------|
+| claim_id | String | Yes |
+| property_id | String | Yes |
+| value_type | String | Yes |
+| value | String | No |
+| value_entity_id | String | No |
+
+#### `references`
+| Column | Type | Required |
+|--------|------|----------|
+| claim_id | String | Yes |
+| property_id | String | Yes |
+| value_type | String | Yes |
+| value | String | No |
+| value_entity_id | String | No |
+
+#### `audit_log` (for change history)
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| action | String | Yes | create, update, delete |
+| entity_type | String | Yes | entity, claim, qualifier, reference |
+| entity_id | String | Yes | ID of the affected entity |
+| user_id | String | No | ID of the user who made the change |
+| user_name | String | No | Name of the user |
+| previous_data | String | No | JSON string of previous data |
+| new_data | String | No | JSON string of new data |
+| metadata | String | No | Additional JSON metadata |
+
+### Environment Variables
+
+```env
+NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
+NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_APPWRITE_DATABASE_ID=your-database-id
+NEXT_PUBLIC_AUTH_ENABLED=true
+```
+
+## 🔐 Permissions System
+
+The application uses team-based permissions through Appwrite Teams:
+
+- **Viewers**: Can view all entities and data (default for authenticated users)
+- **Editors**: Can create, edit, and delete entities, claims, qualifiers, and references
+- **Admins**: Full access including admin panel and audit log viewing
+
+Team roles:
+- `owner` / `admin`: Full admin permissions
+- `editor`: Edit permissions
+- Other roles: View-only permissions
+
+## �💡 Additional notes
 - This starter project is designed to streamline your Next.js development with Appwrite.
 - Refer to the [Appwrite documentation](https://appwrite.io/docs) for detailed integration guidance.

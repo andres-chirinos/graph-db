@@ -4,6 +4,7 @@ import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState } from "@/components";
+import { useAuth } from "@/context/AuthContext";
 import { 
   getEntity, 
   getClaim, 
@@ -20,11 +21,14 @@ import {
   createReference,
   updateReference,
   deleteReference,
+  logAction,
 } from "@/lib/database";
 
 export default function EntityPage({ params }) {
   const { id } = use(params);
   const router = useRouter();
+  const { user, canEdit, canDelete, canCreate, loading: authLoading } = useAuth();
+  
   const [entity, setEntity] = useState(null);
   const [claims, setClaims] = useState([]);
   const [incomingClaims, setIncomingClaims] = useState([]);
@@ -32,8 +36,8 @@ export default function EntityPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // TODO: Obtener de AuthContext cuando la autenticación esté habilitada
-  const editable = true;
+  // Permisos de edición basados en el contexto de autenticación
+  const editable = canEdit || canCreate || canDelete;
 
   useEffect(() => {
     loadEntity();
@@ -72,64 +76,141 @@ export default function EntityPage({ params }) {
 
   // ==================== ENTITY HANDLERS ====================
   async function handleUpdateEntity(data) {
+    const previousData = { label: entity.label, description: entity.description, aliases: entity.aliases };
     await updateEntity(id, data);
+    await logAction("update", {
+      entityType: "entity",
+      entityId: id,
+      userId: user?.$id,
+      userName: user?.name,
+      previousData,
+      newData: data,
+    });
     await loadEntity();
   }
 
   async function handleDeleteEntity() {
+    await logAction("delete", {
+      entityType: "entity",
+      entityId: id,
+      userId: user?.$id,
+      userName: user?.name,
+      previousData: { label: entity.label, description: entity.description },
+    });
     await deleteEntity(id);
     router.push("/entities");
   }
 
   // ==================== CLAIM HANDLERS ====================
   async function handleCreateClaim(data) {
-    await createClaim(data);
+    const result = await createClaim(data);
+    await logAction("create", {
+      entityType: "claim",
+      entityId: result.$id,
+      userId: user?.$id,
+      userName: user?.name,
+      newData: data,
+      metadata: { subjectId: id },
+    });
     await loadEntity();
   }
 
   async function handleUpdateClaim(data, claimId) {
     await updateClaim(claimId, data);
+    await logAction("update", {
+      entityType: "claim",
+      entityId: claimId,
+      userId: user?.$id,
+      userName: user?.name,
+      newData: data,
+    });
     await loadEntity();
   }
 
   async function handleDeleteClaim(claimId) {
+    await logAction("delete", {
+      entityType: "claim",
+      entityId: claimId,
+      userId: user?.$id,
+      userName: user?.name,
+    });
     await deleteClaim(claimId);
     await loadEntity();
   }
 
   // ==================== QUALIFIER HANDLERS ====================
   async function handleCreateQualifier(data) {
-    await createQualifier(data);
+    const result = await createQualifier(data);
+    await logAction("create", {
+      entityType: "qualifier",
+      entityId: result.$id,
+      userId: user?.$id,
+      userName: user?.name,
+      newData: data,
+    });
     await loadEntity();
   }
 
   async function handleUpdateQualifier(data, qualifierId) {
     await updateQualifier(qualifierId, data);
+    await logAction("update", {
+      entityType: "qualifier",
+      entityId: qualifierId,
+      userId: user?.$id,
+      userName: user?.name,
+      newData: data,
+    });
     await loadEntity();
   }
 
   async function handleDeleteQualifier(qualifierId) {
+    await logAction("delete", {
+      entityType: "qualifier",
+      entityId: qualifierId,
+      userId: user?.$id,
+      userName: user?.name,
+    });
     await deleteQualifier(qualifierId);
     await loadEntity();
   }
 
   // ==================== REFERENCE HANDLERS ====================
   async function handleCreateReference(data) {
-    await createReference(data);
+    const result = await createReference(data);
+    await logAction("create", {
+      entityType: "reference",
+      entityId: result.$id,
+      userId: user?.$id,
+      userName: user?.name,
+      newData: data,
+    });
     await loadEntity();
   }
 
   async function handleUpdateReference(data, referenceId) {
     await updateReference(referenceId, data);
+    await logAction("update", {
+      entityType: "reference",
+      entityId: referenceId,
+      userId: user?.$id,
+      userName: user?.name,
+      newData: data,
+    });
     await loadEntity();
   }
 
   async function handleDeleteReference(referenceId) {
+    await logAction("delete", {
+      entityType: "reference",
+      entityId: referenceId,
+      userId: user?.$id,
+      userName: user?.name,
+    });
     await deleteReference(referenceId);
     await loadEntity();
   }
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="explorer-layout">
         <Navigation />
