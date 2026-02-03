@@ -57,7 +57,7 @@ export async function getCurrentUser() {
 }
 
 /**
- * Obtiene los teams del usuario actual
+ * Obtiene los teams del usuario actual (donde es miembro)
  */
 export async function getUserTeams() {
   try {
@@ -65,6 +65,20 @@ export async function getUserTeams() {
     return result.teams || [];
   } catch (error) {
     console.error("Error getting user teams:", error);
+    return [];
+  }
+}
+
+/**
+ * Obtiene todos los teams disponibles en el proyecto
+ * Nota: Esto requiere permisos de lectura en los teams
+ */
+export async function getAllTeams() {
+  try {
+    const result = await teams.list();
+    return result.teams || [];
+  } catch (error) {
+    console.error("Error getting all teams:", error);
     return [];
   }
 }
@@ -92,5 +106,60 @@ export async function getTeamMembers(teamId) {
   } catch (error) {
     console.error("Error getting team members:", error);
     return [];
+  }
+}
+
+/**
+ * Unirse a un team (requiere invitación o permisos)
+ */
+export async function joinTeam(teamId, roles = ["member"]) {
+  try {
+    // Para unirse a un team, normalmente se necesita una invitación
+    // Esta función crea una membresía directa (requiere permisos de admin del team)
+    const user = await getCurrentUser();
+    if (!user) throw new Error("Usuario no autenticado");
+
+    const result = await teams.createMembership({
+      teamId,
+      roles,
+      email: user.email,
+      userId: user.$id,
+    });
+    return result;
+  } catch (error) {
+    console.error("Error joining team:", error);
+    throw error;
+  }
+}
+
+/**
+ * Salir de un team
+ */
+export async function leaveTeam(teamId, membershipId) {
+  try {
+    await teams.deleteMembership({
+      teamId,
+      membershipId,
+    });
+    return true;
+  } catch (error) {
+    console.error("Error leaving team:", error);
+    throw error;
+  }
+}
+
+/**
+ * Obtiene la membresía del usuario actual en un team
+ */
+export async function getUserMembershipInTeam(teamId) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
+    const memberships = await getTeamMembers(teamId);
+    return memberships.find((m) => m.userId === user.$id) || null;
+  } catch (error) {
+    console.error("Error getting user membership:", error);
+    return null;
   }
 }

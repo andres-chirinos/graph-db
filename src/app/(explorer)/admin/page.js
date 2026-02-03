@@ -34,9 +34,12 @@ export default function AdminPage() {
     user, 
     isAuthenticated, 
     authEnabled, 
-    isAdmin, 
+    isAdmin,
+    isMainTeamMember,
     permissions, 
     userTeams,
+    activeTeam,
+    mainTeamId,
     loading: authLoading 
   } = useAuth();
 
@@ -198,12 +201,40 @@ export default function AdminPage() {
                       <h4>Equipos:</h4>
                       <div className="teams-list">
                         {userTeams.map((team) => (
-                          <div key={team.$id} className="team-item">
-                            <span className="team-name">{team.name}</span>
-                            <span className="team-id">{team.$id}</span>
+                          <div 
+                            key={team.$id} 
+                            className={`team-card ${team.$id === mainTeamId ? "main-team" : ""} ${activeTeam?.$id === team.$id ? "active" : ""}`}
+                          >
+                            <div className="team-card-header">
+                              <span className="team-name">
+                                {team.$id === mainTeamId && <span className="main-badge">★ Main</span>}
+                                {team.name}
+                              </span>
+                              {activeTeam?.$id === team.$id && (
+                                <span className="active-badge">Activo</span>
+                              )}
+                            </div>
+                            <div className="team-card-details">
+                              <span className="team-id">ID: {team.$id}</span>
+                              <span className="team-members-count">{team.total} miembros</span>
+                            </div>
+                            {team.roles && team.roles.length > 0 && (
+                              <div className="team-roles">
+                                {team.roles.map((role, idx) => (
+                                  <span key={idx} className={`role-tag ${role}`}>{role}</span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {isMainTeamMember && (
+                    <div className="main-team-notice">
+                      <span className="notice-icon">★</span>
+                      <span>Eres miembro del Main Team. Tienes permisos de administrador.</span>
                     </div>
                   )}
                 </>

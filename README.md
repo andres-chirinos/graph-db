@@ -81,7 +81,10 @@ NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
 NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-project-id
 NEXT_PUBLIC_APPWRITE_DATABASE_ID=your-database-id
 NEXT_PUBLIC_AUTH_ENABLED=true
+NEXT_PUBLIC_MAIN_TEAM_ID=main
 ```
+
+> **Nota:** `NEXT_PUBLIC_MAIN_TEAM_ID` es el ID del equipo principal de administradores. Los miembros de este equipo tienen permisos de administrador automáticamente.
 
 ## 🔐 Permissions System
 
