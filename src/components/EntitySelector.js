@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { searchEntities } from "@/lib/database";
 
 /**
@@ -23,28 +23,49 @@ export default function EntitySelector({
   const [selectedEntity, setSelectedEntity] = useState(null);
   const containerRef = useRef(null);
   const searchTimeout = useRef(null);
+  const isMounted = useRef(true);
+
+  // Cleanup al desmontar
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      if (searchTimeout.current) {
+        clearTimeout(searchTimeout.current);
+      }
+    };
+  }, []);
 
   // Cargar entidad seleccionada si viene un ID
   useEffect(() => {
-    if (value && typeof value === "object") {
-      setSelectedEntity(value);
-    } else if (value && typeof value === "string") {
-      // Si es solo ID, buscarla
-      loadEntityById(value);
-    } else {
-      setSelectedEntity(null);
+    let cancelled = false;
+    
+    async function loadEntity() {
+      if (value && typeof value === "object") {
+        if (!cancelled) setSelectedEntity(value);
+      } else if (value && typeof value === "string") {
+        try {
+          const { getEntity } = await import("@/lib/database");
+          const entity = await getEntity(value, false);
+          if (!cancelled && isMounted.current) {
+            setSelectedEntity(entity);
+          }
+        } catch (e) {
+          if (!cancelled && isMounted.current) {
+            setSelectedEntity({ $id: value, label: value });
+          }
+        }
+      } else {
+        if (!cancelled) setSelectedEntity(null);
+      }
     }
+    
+    loadEntity();
+    
+    return () => {
+      cancelled = true;
+    };
   }, [value]);
-
-  async function loadEntityById(entityId) {
-    try {
-      const { getEntity } = await import("@/lib/database");
-      const entity = await getEntity(entityId, false);
-      setSelectedEntity(entity);
-    } catch (e) {
-      setSelectedEntity({ $id: entityId, label: entityId });
-    }
-  }
 
   // Cerrar dropdown al hacer clic fuera
   useEffect(() => {
@@ -69,24 +90,37 @@ export default function EntitySelector({
       return;
     }
 
+    let cancelled = false;
+
     searchTimeout.current = setTimeout(async () => {
+      if (!isMounted.current || cancelled) return;
+      
       setLoading(true);
       try {
         const result = await searchEntities(searchTerm, 10);
+        if (!isMounted.current || cancelled) return;
+        
+        // Verificar que el resultado tenga rows
+        const rows = result?.rows || [];
         // Filtrar entidades excluidas
-        const filtered = result.rows.filter(
+        const filtered = rows.filter(
           (entity) => !excludeIds.includes(entity.$id)
         );
         setResults(filtered);
       } catch (e) {
         console.error("Error searching entities:", e);
-        setResults([]);
+        if (isMounted.current && !cancelled) {
+          setResults([]);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted.current && !cancelled) {
+          setLoading(false);
+        }
       }
     }, 300);
 
     return () => {
+      cancelled = true;
       if (searchTimeout.current) {
         clearTimeout(searchTimeout.current);
       }

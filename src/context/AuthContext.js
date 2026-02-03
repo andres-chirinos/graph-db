@@ -172,6 +172,10 @@ export function AuthProvider({ children }) {
       };
     }
 
+    // Si el usuario está autenticado, tiene permisos básicos (como Role.users() en Appwrite)
+    // Los permisos adicionales vienen de los teams
+    const isAuthenticatedUser = !!user;
+
     // Verificar si es miembro del Main Team
     // Si MAIN_TEAM_ID no está configurado, el primer team del usuario se considera el Main Team
     const effectiveMainTeamId = MAIN_TEAM_ID || (userTeams.length > 0 ? userTeams[0].$id : null);
@@ -179,11 +183,6 @@ export function AuthProvider({ children }) {
       ? userTeams.find((t) => t.$id === effectiveMainTeamId)
       : null;
     const isMainTeamMember = !!mainTeam;
-
-    // Actualizar el mainTeamId en el estado si no está configurado
-    if (!MAIN_TEAM_ID && effectiveMainTeamId) {
-      console.log("[Auth] No MAIN_TEAM_ID configurado. Usando el primer team como Main Team:", effectiveMainTeamId);
-    }
 
     // Recopilar todos los roles del usuario en todos sus teams
     const allUserRoles = [];
@@ -217,11 +216,12 @@ export function AuthProvider({ children }) {
     // Si es miembro de un team (cualquier rol), tiene permisos de edición
     const isMemberOfAnyTeam = userTeams.length > 0;
 
-    // Los miembros del Main Team O usuarios con rol admin en cualquier team son administradores
-    const isAdminUser = isMainTeamMember || hasAdminRole;
-
-    // Si es miembro de cualquier team, tiene permisos de edición
-    const hasEditPermission = isMemberOfAnyTeam;
+    // PERMISOS:
+    // - canView: cualquier usuario (incluso no autenticado)
+    // - canEdit/canCreate/canDelete: usuario autenticado (Role.users()) O miembro de team
+    // - isAdmin: miembro del Main Team O tiene rol admin en algún team
+    const hasEditPermission = isAuthenticatedUser; // Usuarios autenticados pueden editar (Role.users())
+    const isAdminUser = isMainTeamMember || hasAdminRole || isMemberOfAnyTeam; // Miembros de teams son admin
 
     const result = {
       canView: true,
@@ -230,11 +230,13 @@ export function AuthProvider({ children }) {
       canCreate: hasEditPermission,
       isAdmin: isAdminUser,
       isMainTeamMember,
+      isMemberOfAnyTeam,
       roles: [...new Set(allUserRoles)],
       activeTeamRoles: [...new Set(activeTeamRoles)],
     };
 
     console.log("[Auth] Permisos calculados:", {
+      isAuthenticatedUser,
       isMainTeamMember,
       hasEditorRole,
       hasAdminRole,

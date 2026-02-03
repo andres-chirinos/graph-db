@@ -4,6 +4,14 @@
  * Renderiza URLs de imágenes.
  */
 
+function getThumbnailUrl(url) {
+  // Si es una URL de Commons, generar thumbnail
+  if (url.includes("commons.wikimedia.org")) {
+    return url.replace("/commons/", "/commons/thumb/") + "/120px-thumbnail.jpg";
+  }
+  return url;
+}
+
 const ImagePlugin = {
   name: "image",
   datatypes: ["image", "photo", "picture", "media"],
@@ -24,7 +32,7 @@ const ImagePlugin = {
       url,
       alt,
       caption,
-      thumbnail: this.getThumbnailUrl(url),
+      thumbnail: getThumbnailUrl(url),
     };
   },
 
@@ -35,17 +43,11 @@ const ImagePlugin = {
     const url = typeof data === "string" ? data : data.url;
     return {
       type: "image-thumbnail",
-      url: this.getThumbnailUrl(url),
+      url: getThumbnailUrl(url),
     };
   },
 
-  getThumbnailUrl(url) {
-    // Si es una URL de Commons, generar thumbnail
-    if (url.includes("commons.wikimedia.org")) {
-      return url.replace("/commons/", "/commons/thumb/") + "/120px-thumbnail.jpg";
-    }
-    return url;
-  },
+  getThumbnailUrl,
 };
 
 export default ImagePlugin;

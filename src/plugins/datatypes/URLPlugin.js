@@ -4,6 +4,15 @@
  * Renderiza URLs y enlaces.
  */
 
+function getDisplayUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname + (parsed.pathname !== "/" ? parsed.pathname : "");
+  } catch {
+    return url.length > 50 ? url.substring(0, 50) + "..." : url;
+  }
+}
+
 const URLPlugin = {
   name: "url",
   datatypes: ["url", "uri", "link"],
@@ -16,7 +25,7 @@ const URLPlugin = {
 
     const url = String(data);
     const { fullValue } = options;
-    const label = fullValue?.label || this.getDisplayUrl(url);
+    const label = fullValue?.label || getDisplayUrl(url);
 
     return {
       type: "link",
@@ -30,17 +39,10 @@ const URLPlugin = {
     if (data === null || data === undefined) {
       return null;
     }
-    return this.getDisplayUrl(String(data));
+    return getDisplayUrl(String(data));
   },
 
-  getDisplayUrl(url) {
-    try {
-      const parsed = new URL(url);
-      return parsed.hostname + (parsed.pathname !== "/" ? parsed.pathname : "");
-    } catch {
-      return url.length > 50 ? url.substring(0, 50) + "..." : url;
-    }
-  },
+  getDisplayUrl,
 };
 
 export default URLPlugin;
