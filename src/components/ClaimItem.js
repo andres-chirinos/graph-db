@@ -1,12 +1,29 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import ValueRenderer from "./ValueRenderer";
+import QualifierForm from "./QualifierForm";
+import ReferenceForm from "./ReferenceForm";
+import { ConfirmModal } from "./EditModal";
 
 /**
  * Muestra un claim individual con su propiedad, valor, qualifiers y referencias
  */
-export default function ClaimItem({ claim, showQualifiers = true, showReferences = true }) {
+export default function ClaimItem({ 
+  claim, 
+  showQualifiers = true, 
+  showReferences = true,
+  editable = false,
+  onEdit,
+  onDelete,
+  onQualifierCreate,
+  onQualifierUpdate,
+  onQualifierDelete,
+  onReferenceCreate,
+  onReferenceUpdate,
+  onReferenceDelete,
+}) {
   if (!claim) return null;
 
   const { $id, property, value_raw, value_relation, qualifiersList, referencesList } = claim;
@@ -18,6 +35,22 @@ export default function ClaimItem({ claim, showQualifiers = true, showReferences
       parsedValue = typeof value_raw === "string" ? JSON.parse(value_raw) : value_raw;
     } catch (e) {
       parsedValue = { datatype: "string", data: value_raw };
+    }
+  }
+
+  // Estados para modales
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await onDelete?.(claim.$id);
+      setShowDeleteConfirm(false);
+    } catch (e) {
+      console.error("Error deleting claim:", e);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -47,33 +80,91 @@ export default function ClaimItem({ claim, showQualifiers = true, showReferences
             <span className="value-empty">(Sin valor)</span>
           )}
         </div>
+
+        {/* Acciones del claim */}
+        {editable && (
+          <div className="claim-actions">
+            <button
+              type="button"
+              className="btn-icon btn-edit"
+              onClick={() => onEdit?.(claim)}
+              title="Editar declaración"
+            >
+              ✎
+            </button>
+            <button
+              type="button"
+              className="btn-icon btn-delete"
+              onClick={() => setShowDeleteConfirm(true)}
+              title="Eliminar declaración"
+            >
+              🗑
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Qualifiers */}
-      {showQualifiers && qualifiersList && qualifiersList.length > 0 && (
+      {showQualifiers && (
         <div className="claim-qualifiers">
-          {qualifiersList.map((qualifier) => (
-            <QualifierItem key={qualifier.$id} qualifier={qualifier} />
-          ))}
+          {qualifiersList && qualifiersList.length > 0 && (
+            qualifiersList.map((qualifier) => (
+              <QualifierItem 
+                key={qualifier.$id} 
+                qualifier={qualifier}
+                editable={editable}
+                onEdit={onQualifierUpdate}
+                onDelete={onQualifierDelete}
+              />
+            ))
+          )}
+          {editable && (
+            <AddQualifierButton 
+              claimId={$id} 
+              onSave={onQualifierCreate}
+            />
+          )}
         </div>
       )}
 
       {/* Referencias */}
-      {showReferences && referencesList && referencesList.length > 0 && (
+      {showReferences && (
         <div className="claim-references">
           <details className="references-toggle">
             <summary>
               <span className="icon-info"></span>
-              {referencesList.length} referencia{referencesList.length !== 1 ? "s" : ""}
+              {referencesList?.length || 0} referencia{(referencesList?.length || 0) !== 1 ? "s" : ""}
             </summary>
             <div className="references-list">
-              {referencesList.map((ref) => (
-                <ReferenceItem key={ref.$id} reference={ref} />
+              {referencesList?.map((ref) => (
+                <ReferenceItem 
+                  key={ref.$id} 
+                  reference={ref}
+                  editable={editable}
+                  onEdit={onReferenceUpdate}
+                  onDelete={onReferenceDelete}
+                />
               ))}
+              {editable && (
+                <AddReferenceButton 
+                  claimId={$id} 
+                  onSave={onReferenceCreate}
+                />
+              )}
             </div>
           </details>
         </div>
       )}
+
+      {/* Modal de confirmación de eliminación */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Eliminar declaración"
+        message="¿Estás seguro de que deseas eliminar esta declaración? También se eliminarán todos sus calificadores y referencias."
+        loading={deleting}
+      />
     </div>
   );
 }
@@ -81,8 +172,11 @@ export default function ClaimItem({ claim, showQualifiers = true, showReferences
 /**
  * Muestra un qualifier
  */
-function QualifierItem({ qualifier }) {
+function QualifierItem({ qualifier, editable, onEdit, onDelete }) {
   const { property, value_raw, value_relation } = qualifier;
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   let parsedValue = null;
   if (value_raw) {
@@ -90,6 +184,18 @@ function QualifierItem({ qualifier }) {
       parsedValue = typeof value_raw === "string" ? JSON.parse(value_raw) : value_raw;
     } catch (e) {
       parsedValue = { datatype: "string", data: value_raw };
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await onDelete?.(qualifier.$id);
+      setShowDeleteConfirm(false);
+    } catch (e) {
+      console.error("Error deleting qualifier:", e);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -115,6 +221,48 @@ function QualifierItem({ qualifier }) {
           "(Sin valor)"
         )}
       </span>
+
+      {editable && (
+        <div className="qualifier-actions">
+          <button
+            type="button"
+            className="btn-icon-sm btn-edit"
+            onClick={() => setShowEditForm(true)}
+            title="Editar calificador"
+          >
+            ✎
+          </button>
+          <button
+            type="button"
+            className="btn-icon-sm btn-delete"
+            onClick={() => setShowDeleteConfirm(true)}
+            title="Eliminar calificador"
+          >
+            🗑
+          </button>
+        </div>
+      )}
+
+      {showEditForm && (
+        <QualifierForm
+          isOpen={showEditForm}
+          onClose={() => setShowEditForm(false)}
+          onSave={async (data) => {
+            await onEdit?.(data, qualifier.$id);
+          }}
+          qualifier={qualifier}
+          claimId={qualifier.claim}
+        />
+      )}
+
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Eliminar calificador"
+        message="¿Estás seguro de que deseas eliminar este calificador?"
+        loading={deleting}
+      />
     </div>
   );
 }
@@ -122,8 +270,23 @@ function QualifierItem({ qualifier }) {
 /**
  * Muestra una referencia
  */
-function ReferenceItem({ reference }) {
+function ReferenceItem({ reference, editable, onEdit, onDelete }) {
   const { details, reference: refEntity } = reference;
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await onDelete?.(reference.$id);
+      setShowDeleteConfirm(false);
+    } catch (e) {
+      console.error("Error deleting reference:", e);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <div className="reference-item">
@@ -133,6 +296,110 @@ function ReferenceItem({ reference }) {
         </Link>
       )}
       {details && <span className="reference-details">{details}</span>}
+
+      {editable && (
+        <div className="reference-actions">
+          <button
+            type="button"
+            className="btn-icon-sm btn-edit"
+            onClick={() => setShowEditForm(true)}
+            title="Editar referencia"
+          >
+            ✎
+          </button>
+          <button
+            type="button"
+            className="btn-icon-sm btn-delete"
+            onClick={() => setShowDeleteConfirm(true)}
+            title="Eliminar referencia"
+          >
+            🗑
+          </button>
+        </div>
+      )}
+
+      {showEditForm && (
+        <ReferenceForm
+          isOpen={showEditForm}
+          onClose={() => setShowEditForm(false)}
+          onSave={async (data) => {
+            await onEdit?.(data, reference.$id);
+          }}
+          reference={reference}
+          claimId={reference.claim}
+        />
+      )}
+
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Eliminar referencia"
+        message="¿Estás seguro de que deseas eliminar esta referencia?"
+        loading={deleting}
+      />
     </div>
+  );
+}
+
+/**
+ * Botón para añadir un qualifier
+ */
+function AddQualifierButton({ claimId, onSave }) {
+  const [showForm, setShowForm] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-add-inline"
+        onClick={() => setShowForm(true)}
+      >
+        + Añadir calificador
+      </button>
+
+      {showForm && (
+        <QualifierForm
+          isOpen={showForm}
+          onClose={() => setShowForm(false)}
+          onSave={async (data) => {
+            await onSave?.(data);
+            setShowForm(false);
+          }}
+          claimId={claimId}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Botón para añadir una referencia
+ */
+function AddReferenceButton({ claimId, onSave }) {
+  const [showForm, setShowForm] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-add-inline"
+        onClick={() => setShowForm(true)}
+      >
+        + Añadir referencia
+      </button>
+
+      {showForm && (
+        <ReferenceForm
+          isOpen={showForm}
+          onClose={() => setShowForm(false)}
+          onSave={async (data) => {
+            await onSave?.(data);
+            setShowForm(false);
+          }}
+          claimId={claimId}
+        />
+      )}
+    </>
   );
 }

@@ -290,6 +290,132 @@ export async function createReference(data) {
   return result;
 }
 
+/**
+ * Actualiza una referencia existente
+ */
+export async function updateReference(referenceId, data) {
+  const updateData = {};
+  if (data.details !== undefined) updateData.details = data.details;
+  if (data.reference !== undefined) updateData.reference = data.reference;
+
+  const result = await tablesDB.updateRow({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.REFERENCES,
+    rowId: referenceId,
+    data: updateData,
+  });
+
+  return result;
+}
+
+/**
+ * Elimina una referencia
+ */
+export async function deleteReference(referenceId) {
+  await tablesDB.deleteRow({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.REFERENCES,
+    rowId: referenceId,
+  });
+}
+
+/**
+ * Actualiza un qualifier existente
+ */
+export async function updateQualifier(qualifierId, data) {
+  const updateData = {};
+  if (data.property !== undefined) updateData.property = data.property;
+  if (data.value_raw !== undefined) {
+    updateData.value_raw = data.value_raw ? JSON.stringify(data.value_raw) : null;
+  }
+  if (data.value_relation !== undefined) updateData.value_relation = data.value_relation;
+
+  const result = await tablesDB.updateRow({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.QUALIFIERS,
+    rowId: qualifierId,
+    data: updateData,
+  });
+
+  return result;
+}
+
+/**
+ * Elimina un qualifier
+ */
+export async function deleteQualifier(qualifierId) {
+  await tablesDB.deleteRow({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.QUALIFIERS,
+    rowId: qualifierId,
+  });
+}
+
+/**
+ * Actualiza un claim existente
+ */
+export async function updateClaim(claimId, data) {
+  const updateData = {};
+  if (data.property !== undefined) updateData.property = data.property;
+  if (data.value_raw !== undefined) {
+    updateData.value_raw = data.value_raw ? JSON.stringify(data.value_raw) : null;
+  }
+  if (data.value_relation !== undefined) updateData.value_relation = data.value_relation;
+
+  const result = await tablesDB.updateRow({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.CLAIMS,
+    rowId: claimId,
+    data: updateData,
+  });
+
+  return result;
+}
+
+/**
+ * Elimina un claim y todos sus qualifiers y references asociados
+ */
+export async function deleteClaim(claimId) {
+  // Primero eliminar qualifiers
+  const qualifiers = await getQualifiersByClaim(claimId);
+  for (const qualifier of qualifiers) {
+    await deleteQualifier(qualifier.$id);
+  }
+
+  // Eliminar references
+  const references = await getReferencesByClaim(claimId);
+  for (const reference of references) {
+    await deleteReference(reference.$id);
+  }
+
+  // Finalmente eliminar el claim
+  await tablesDB.deleteRow({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.CLAIMS,
+    rowId: claimId,
+  });
+}
+
+/**
+ * Elimina una entidad y todos sus claims asociados
+ */
+export async function deleteEntity(entityId) {
+  // Obtener todos los claims de esta entidad
+  const claims = await getClaimsBySubject(entityId);
+  
+  // Eliminar cada claim (esto también elimina qualifiers y references)
+  for (const claim of claims) {
+    await deleteClaim(claim.$id);
+  }
+
+  // Finalmente eliminar la entidad
+  await tablesDB.deleteRow({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.ENTITIES,
+    rowId: entityId,
+  });
+}
+
 // ============================================
 // UTILITIES
 // ============================================

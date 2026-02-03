@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 /**
- * Barra de búsqueda de entidades estilo Wikidata
+ * Barra de búsqueda de entidades
  */
 export default function SearchBar({ onSearch, placeholder = "Buscar entidades..." }) {
   const [query, setQuery] = useState("");

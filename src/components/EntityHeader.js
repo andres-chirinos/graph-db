@@ -1,22 +1,68 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import ClaimsList from "./ClaimsList";
+import EntityForm from "./EntityForm";
+import { ConfirmModal } from "./EditModal";
 
 /**
- * Encabezado de entidad estilo Wikidata
+ * Encabezado de entidad
  */
-export default function EntityHeader({ entity }) {
+export default function EntityHeader({ 
+  entity, 
+  editable = false,
+  onUpdate,
+  onDelete,
+}) {
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   if (!entity) return null;
 
   const { $id, label, description, aliases, $createdAt, $updatedAt } = entity;
 
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await onDelete?.();
+      setShowDeleteConfirm(false);
+    } catch (e) {
+      console.error("Error deleting entity:", e);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <header className="entity-header">
       <div className="entity-header-main">
-        <div className="entity-id-badge">
-          <span className="id-prefix">ID:</span>
-          <span className="id-value">{$id}</span>
+        <div className="entity-header-top">
+          <div className="entity-id-badge">
+            <span className="id-prefix">ID:</span>
+            <span className="id-value">{$id}</span>
+          </div>
+
+          {editable && (
+            <div className="entity-header-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowEditForm(true)}
+                title="Editar entidad"
+              >
+                ✎ Editar
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={() => setShowDeleteConfirm(true)}
+                title="Eliminar entidad"
+              >
+                🗑 Eliminar
+              </button>
+            </div>
+          )}
         </div>
 
         <h1 className="entity-title">
@@ -53,6 +99,29 @@ export default function EntityHeader({ entity }) {
           </span>
         </div>
       </div>
+
+      {/* Modal de edición */}
+      {showEditForm && (
+        <EntityForm
+          isOpen={showEditForm}
+          onClose={() => setShowEditForm(false)}
+          onSave={async (data) => {
+            await onUpdate?.(data);
+            setShowEditForm(false);
+          }}
+          entity={entity}
+        />
+      )}
+
+      {/* Modal de confirmación de eliminación */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Eliminar entidad"
+        message={`¿Estás seguro de que deseas eliminar la entidad "${label || $id}"? También se eliminarán todas sus declaraciones, calificadores y referencias.`}
+        loading={deleting}
+      />
     </header>
   );
 }

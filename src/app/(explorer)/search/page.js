@@ -83,7 +83,7 @@ export default function SearchPage() {
       </main>
 
       <footer className="explorer-footer">
-        <p>Graph DB Explorer — Basado en el modelo de Wikidata</p>
+        <p>Graph DB Explorer</p>
       </footer>
     </div>
   );

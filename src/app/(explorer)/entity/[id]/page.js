@@ -2,17 +2,38 @@
 
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState } from "@/components";
-import { getEntity, getClaim, getClaimsByValueRelation, getClaimsByProperty } from "@/lib/database";
+import { 
+  getEntity, 
+  getClaim, 
+  getClaimsByValueRelation, 
+  getClaimsByProperty,
+  updateEntity,
+  deleteEntity,
+  createClaim,
+  updateClaim,
+  deleteClaim,
+  createQualifier,
+  updateQualifier,
+  deleteQualifier,
+  createReference,
+  updateReference,
+  deleteReference,
+} from "@/lib/database";
 
 export default function EntityPage({ params }) {
   const { id } = use(params);
+  const router = useRouter();
   const [entity, setEntity] = useState(null);
   const [claims, setClaims] = useState([]);
   const [incomingClaims, setIncomingClaims] = useState([]);
   const [usedAsProperty, setUsedAsProperty] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // TODO: Obtener de AuthContext cuando la autenticación esté habilitada
+  const editable = true;
 
   useEffect(() => {
     loadEntity();
@@ -31,6 +52,8 @@ export default function EntityPage({ params }) {
           entityData.claims.map((claim) => getClaim(claim.$id))
         );
         setClaims(claimsWithDetails);
+      } else {
+        setClaims([]);
       }
 
       // Cargar relaciones inversas (donde esta entidad es el valor)
@@ -45,6 +68,65 @@ export default function EntityPage({ params }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  // ==================== ENTITY HANDLERS ====================
+  async function handleUpdateEntity(data) {
+    await updateEntity(id, data);
+    await loadEntity();
+  }
+
+  async function handleDeleteEntity() {
+    await deleteEntity(id);
+    router.push("/entities");
+  }
+
+  // ==================== CLAIM HANDLERS ====================
+  async function handleCreateClaim(data) {
+    await createClaim(data);
+    await loadEntity();
+  }
+
+  async function handleUpdateClaim(data, claimId) {
+    await updateClaim(claimId, data);
+    await loadEntity();
+  }
+
+  async function handleDeleteClaim(claimId) {
+    await deleteClaim(claimId);
+    await loadEntity();
+  }
+
+  // ==================== QUALIFIER HANDLERS ====================
+  async function handleCreateQualifier(data) {
+    await createQualifier(data);
+    await loadEntity();
+  }
+
+  async function handleUpdateQualifier(data, qualifierId) {
+    await updateQualifier(qualifierId, data);
+    await loadEntity();
+  }
+
+  async function handleDeleteQualifier(qualifierId) {
+    await deleteQualifier(qualifierId);
+    await loadEntity();
+  }
+
+  // ==================== REFERENCE HANDLERS ====================
+  async function handleCreateReference(data) {
+    await createReference(data);
+    await loadEntity();
+  }
+
+  async function handleUpdateReference(data, referenceId) {
+    await updateReference(referenceId, data);
+    await loadEntity();
+  }
+
+  async function handleDeleteReference(referenceId) {
+    await deleteReference(referenceId);
+    await loadEntity();
   }
 
   if (loading) {
@@ -113,7 +195,12 @@ export default function EntityPage({ params }) {
           </nav>
 
           {/* Entity Header */}
-          <EntityHeader entity={entity} />
+          <EntityHeader 
+            entity={entity}
+            editable={editable}
+            onUpdate={handleUpdateEntity}
+            onDelete={handleDeleteEntity}
+          />
 
           {/* Claims / Statements */}
           <section className="entity-statements">
@@ -121,7 +208,20 @@ export default function EntityPage({ params }) {
               <span className="icon-list"></span>
               Declaraciones
             </h2>
-            <ClaimsList claims={claims} />
+            <ClaimsList 
+              claims={claims}
+              subjectId={id}
+              editable={editable}
+              onClaimCreate={handleCreateClaim}
+              onClaimUpdate={handleUpdateClaim}
+              onClaimDelete={handleDeleteClaim}
+              onQualifierCreate={handleCreateQualifier}
+              onQualifierUpdate={handleUpdateQualifier}
+              onQualifierDelete={handleDeleteQualifier}
+              onReferenceCreate={handleCreateReference}
+              onReferenceUpdate={handleUpdateReference}
+              onReferenceDelete={handleDeleteReference}
+            />
           </section>
 
           {/* Incoming Relations - Where this entity is referenced as value */}
@@ -200,7 +300,7 @@ export default function EntityPage({ params }) {
       </main>
 
       <footer className="explorer-footer">
-        <p>Graph DB Explorer — Basado en el modelo de Wikidata</p>
+        <p>Graph DB Explorer</p>
       </footer>
     </div>
   );

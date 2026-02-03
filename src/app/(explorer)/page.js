@@ -62,7 +62,7 @@ export default function HomePage() {
           <section className="hero-section">
             <h1 className="hero-title">Explorador de Entidades</h1>
             <p className="hero-subtitle">
-              Base de conocimiento estructurada al estilo Wikidata
+              Base de conocimiento
             </p>
 
             <SearchBar
@@ -148,7 +148,7 @@ export default function HomePage() {
       </main>
 
       <footer className="explorer-footer">
-        <p>Graph DB Explorer — Basado en el modelo de Wikidata</p>
+        <p>Graph DB Explorer</p>
       </footer>
     </div>
   );

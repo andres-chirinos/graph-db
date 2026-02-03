@@ -2,7 +2,7 @@ import Providers from "./providers";
 
 export const metadata = {
   title: "Graph DB Explorer",
-  description: "Explorador de entidades estilo Wikidata",
+  description: "Explorador de entidades",
 };
 
 export default function RootLayout({ children }) {

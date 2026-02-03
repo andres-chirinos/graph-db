@@ -1,18 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Navigation, EntityCard, LoadingState, ErrorState, EmptyState } from "@/components";
-import { listEntities } from "@/lib/database";
+import { listEntities, createEntity } from "@/lib/database";
+import EntityForm from "@/components/EntityForm";
 
 const ITEMS_PER_PAGE = 25;
 
 export default function EntitiesListPage() {
+  const router = useRouter();
   const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [total, setTotal] = useState(0);
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
   useEffect(() => {
     loadEntities();
@@ -31,6 +35,12 @@ export default function EntitiesListPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleCreateEntity(data) {
+    const newEntity = await createEntity(data);
+    // Navegar a la nueva entidad
+    router.push(`/entity/${newEntity.$id}`);
   }
 
   function nextPage() {
@@ -52,10 +62,21 @@ export default function EntitiesListPage() {
       <main className="explorer-main">
         <div className="explorer-container">
           <header className="page-header">
-            <h1 className="page-title">Todas las Entidades</h1>
-            <p className="page-subtitle">
-              Explorando {total} entidades en la base de datos
-            </p>
+            <div className="page-header-content">
+              <h1 className="page-title">Todas las Entidades</h1>
+              <p className="page-subtitle">
+                Explorando {total} entidades en la base de datos
+              </p>
+            </div>
+            <div className="page-header-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowCreateForm(true)}
+              >
+                + Nueva Entidad
+              </button>
+            </div>
           </header>
 
           {loading ? (
@@ -67,7 +88,15 @@ export default function EntitiesListPage() {
               title="Sin entidades"
               message="No hay entidades en la base de datos todavía"
               icon="database"
-            />
+            >
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowCreateForm(true)}
+              >
+                Crear primera entidad
+              </button>
+            </EmptyState>
           ) : (
             <>
               <div className="entities-list">
@@ -106,8 +135,17 @@ export default function EntitiesListPage() {
       </main>
 
       <footer className="explorer-footer">
-        <p>Graph DB Explorer — Basado en el modelo de Wikidata</p>
+        <p>Graph DB Explorer</p>
       </footer>
+
+      {/* Modal para crear entidad */}
+      {showCreateForm && (
+        <EntityForm
+          isOpen={showCreateForm}
+          onClose={() => setShowCreateForm(false)}
+          onSave={handleCreateEntity}
+        />
+      )}
     </div>
   );
 }
