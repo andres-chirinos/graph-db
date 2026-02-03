@@ -3,12 +3,14 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState } from "@/components";
-import { getEntity, getClaim } from "@/lib/database";
+import { getEntity, getClaim, getClaimsByValueRelation, getClaimsByProperty } from "@/lib/database";
 
 export default function EntityPage({ params }) {
   const { id } = use(params);
   const [entity, setEntity] = useState(null);
   const [claims, setClaims] = useState([]);
+  const [incomingClaims, setIncomingClaims] = useState([]);
+  const [usedAsProperty, setUsedAsProperty] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -30,6 +32,14 @@ export default function EntityPage({ params }) {
         );
         setClaims(claimsWithDetails);
       }
+
+      // Cargar relaciones inversas (donde esta entidad es el valor)
+      const incoming = await getClaimsByValueRelation(id);
+      setIncomingClaims(incoming);
+
+      // Cargar claims donde esta entidad es usada como propiedad
+      const asProperty = await getClaimsByProperty(id);
+      setUsedAsProperty(asProperty);
     } catch (err) {
       setError(err);
     } finally {
@@ -114,22 +124,74 @@ export default function EntityPage({ params }) {
             <ClaimsList claims={claims} />
           </section>
 
-          {/* Related Entities Section */}
-          {entity.claims_subject && entity.claims_subject.length > 0 && (
-            <section className="entity-related">
+          {/* Incoming Relations - Where this entity is referenced as value */}
+          {incomingClaims.length > 0 && (
+            <section className="entity-incoming">
               <h2 className="section-title">
-                <span className="icon-link"></span>
-                Usado como propiedad en
+                <span className="icon-arrow-left"></span>
+                Lo que enlaza aquí
               </h2>
-              <div className="related-list">
-                {entity.claims_subject.slice(0, 10).map((claim) => (
-                  <Link
-                    key={claim.$id}
-                    href={`/entity/${claim.subject?.$id}`}
-                    className="related-item"
-                  >
-                    {claim.subject?.label || claim.subject?.$id}
-                  </Link>
+              <p className="section-description">
+                Entidades que hacen referencia a esta entidad
+              </p>
+              <div className="incoming-claims-list">
+                {incomingClaims.map((claim) => (
+                  <div key={claim.$id} className="incoming-claim-item">
+                    <Link 
+                      href={`/entity/${claim.subject?.$id}`} 
+                      className="incoming-subject"
+                    >
+                      {claim.subject?.label || claim.subject?.$id}
+                    </Link>
+                    <span className="incoming-property">
+                      {claim.property?.label || claim.property?.$id}
+                    </span>
+                    <span className="incoming-arrow">→</span>
+                    <span className="incoming-value-self">
+                      {entity.label || entity.$id}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Used as Property */}
+          {usedAsProperty.length > 0 && (
+            <section className="entity-as-property">
+              <h2 className="section-title">
+                <span className="icon-tag"></span>
+                Usado como propiedad
+              </h2>
+              <p className="section-description">
+                Declaraciones que usan esta entidad como propiedad
+              </p>
+              <div className="incoming-claims-list">
+                {usedAsProperty.map((claim) => (
+                  <div key={claim.$id} className="incoming-claim-item">
+                    <Link 
+                      href={`/entity/${claim.subject?.$id}`} 
+                      className="incoming-subject"
+                    >
+                      {claim.subject?.label || claim.subject?.$id}
+                    </Link>
+                    <span className="incoming-property-self">
+                      {entity.label || entity.$id}
+                    </span>
+                    <span className="incoming-arrow">→</span>
+                    {claim.value_relation ? (
+                      <Link 
+                        href={`/entity/${claim.value_relation.$id}`}
+                        className="incoming-value"
+                      >
+                        {claim.value_relation.label || claim.value_relation.$id}
+                      </Link>
+                    ) : (
+                      <span className="incoming-value-raw">
+                        {claim.value_raw || "(valor)"}
+                      </span>
+                    )}
+                  </div>
                 ))}
               </div>
             </section>

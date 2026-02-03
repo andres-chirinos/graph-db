@@ -131,6 +131,41 @@ export async function getClaimsBySubject(subjectId) {
 }
 
 /**
+ * Obtiene todos los claims donde esta entidad es el value_relation (relaciones inversas)
+ * Es decir, otras entidades que apuntan a esta entidad
+ */
+export async function getClaimsByValueRelation(entityId) {
+  const result = await tablesDB.listRows({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.CLAIMS,
+    queries: [
+      Query.equal("value_relation", entityId),
+      Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
+      Query.limit(100),
+    ],
+  });
+
+  return result.rows;
+}
+
+/**
+ * Obtiene todos los claims donde esta entidad es usada como propiedad
+ */
+export async function getClaimsByProperty(propertyId) {
+  const result = await tablesDB.listRows({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.CLAIMS,
+    queries: [
+      Query.equal("property", propertyId),
+      Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
+      Query.limit(100),
+    ],
+  });
+
+  return result.rows;
+}
+
+/**
  * Obtiene un claim específico con sus qualifiers y references
  * Incluye los datos expandidos de las relaciones
  */

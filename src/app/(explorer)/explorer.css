@@ -717,6 +717,101 @@
 }
 
 /* ============================================
+   INCOMING RELATIONS / WHAT LINKS HERE
+   ============================================ */
+
+.entity-incoming,
+.entity-as-property {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xl);
+  margin-bottom: var(--spacing-xl);
+}
+
+.entity-incoming .section-title .icon-arrow-left::before {
+  content: "←";
+  margin-right: var(--spacing-xs);
+}
+
+.entity-as-property .section-title .icon-tag::before {
+  content: "🏷️";
+  margin-right: var(--spacing-xs);
+}
+
+.section-description {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-lg);
+}
+
+.incoming-claims-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.incoming-claim-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.9375rem;
+  flex-wrap: wrap;
+}
+
+.incoming-subject {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.incoming-subject:hover {
+  text-decoration: underline;
+}
+
+.incoming-property {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.incoming-property-self {
+  color: var(--color-accent);
+  font-weight: 500;
+  background: var(--color-bg-alt);
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.incoming-arrow {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.incoming-value {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.incoming-value:hover {
+  text-decoration: underline;
+}
+
+.incoming-value-self {
+  color: var(--color-success);
+  font-weight: 600;
+  background: rgba(0, 150, 0, 0.1);
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.incoming-value-raw {
+  color: var(--color-text-secondary);
+}
+
+/* ============================================
    VALUE RENDERERS
    ============================================ */
 
