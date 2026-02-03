@@ -16,6 +16,7 @@ const DATA_TYPES = [
   { id: "url", label: "URL" },
   { id: "image", label: "Imagen (URL)" },
   { id: "coordinate", label: "Coordenadas" },
+  { id: "polygon", label: "Polígono" },
   { id: "color", label: "Color" },
   { id: "json", label: "JSON" },
   { id: "entity", label: "Entidad (relación)" },

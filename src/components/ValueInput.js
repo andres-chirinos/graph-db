@@ -9,6 +9,7 @@ const DATATYPES = [
   { value: "url", label: "URL" },
   { value: "boolean", label: "Booleano" },
   { value: "coordinate", label: "Coordenadas" },
+  { value: "polygon", label: "Polígono" },
   { value: "color", label: "Color" },
   { value: "image", label: "Imagen (URL)" },
   { value: "json", label: "JSON" },
@@ -68,6 +69,11 @@ export default function ValueInput({
           return `${data.lat}, ${data.lng}`;
         }
         return String(data);
+      case "polygon":
+        if (typeof data === "object") {
+          return JSON.stringify(data, null, 2);
+        }
+        return String(data);
       case "boolean":
         return data ? "true" : "false";
       case "json":
@@ -98,6 +104,12 @@ export default function ValueInput({
           }
         }
         return inputValue;
+      case "polygon":
+        try {
+          return JSON.parse(inputValue);
+        } catch {
+          return inputValue;
+        }
       case "json":
         try {
           return JSON.parse(inputValue);
@@ -194,6 +206,16 @@ export default function ValueInput({
           <input
             type="text"
             placeholder="Latitud, Longitud (ej: 40.7128, -74.0060)"
+            {...commonProps}
+          />
+        );
+
+      case "polygon":
+        return (
+          <textarea
+            className="form-textarea form-textarea-code"
+            placeholder='{"type": "Polygon", "coordinates": [[[lng, lat], [lng, lat], ...]]}'
+            rows={6}
             {...commonProps}
           />
         );

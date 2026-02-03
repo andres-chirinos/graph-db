@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { searchEntities } from "@/lib/database";
 
 /**
@@ -24,6 +24,9 @@ export default function EntitySelector({
   const containerRef = useRef(null);
   const searchTimeout = useRef(null);
   const isMounted = useRef(true);
+
+  // Memoizar excludeIds para evitar re-renders infinitos
+  const excludeIdsKey = useMemo(() => excludeIds.join(","), [excludeIds]);
 
   // Cleanup al desmontar
   useEffect(() => {
@@ -103,8 +106,9 @@ export default function EntitySelector({
         // Verificar que el resultado tenga rows
         const rows = result?.rows || [];
         // Filtrar entidades excluidas
+        const excludeSet = new Set(excludeIdsKey.split(",").filter(Boolean));
         const filtered = rows.filter(
-          (entity) => !excludeIds.includes(entity.$id)
+          (entity) => !excludeSet.has(entity.$id)
         );
         setResults(filtered);
       } catch (e) {
@@ -125,7 +129,7 @@ export default function EntitySelector({
         clearTimeout(searchTimeout.current);
       }
     };
-  }, [searchTerm, excludeIds]);
+  }, [searchTerm, excludeIdsKey]);
 
   function handleSelect(entity) {
     setSelectedEntity(entity);
