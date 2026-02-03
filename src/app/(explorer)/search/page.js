@@ -20,7 +20,7 @@ export default function SearchPage() {
     setHasSearched(true);
     try {
       const result = await searchEntities(query, 50);
-      setResults(result.documents);
+      setResults(result.rows);
     } catch (err) {
       setError(err);
     } finally {

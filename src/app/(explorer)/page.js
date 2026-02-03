@@ -21,7 +21,7 @@ export default function HomePage() {
     setError(null);
     try {
       const result = await listEntities(10, 0);
-      setEntities(result.documents);
+      setEntities(result.rows);
     } catch (err) {
       setError(err);
     } finally {
@@ -35,7 +35,7 @@ export default function HomePage() {
     setError(null);
     try {
       const result = await searchEntities(query, 20);
-      setSearchResults(result.documents);
+      setSearchResults(result.rows);
     } catch (err) {
       setError(err);
     } finally {

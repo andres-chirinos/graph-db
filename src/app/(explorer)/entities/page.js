@@ -23,9 +23,9 @@ export default function EntitiesListPage() {
     setError(null);
     try {
       const result = await listEntities(ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
-      setEntities(result.documents);
+      setEntities(result.rows);
       setTotal(result.total);
-      setHasMore(result.documents.length === ITEMS_PER_PAGE);
+      setHasMore(result.rows.length === ITEMS_PER_PAGE);
     } catch (err) {
       setError(err);
     } finally {

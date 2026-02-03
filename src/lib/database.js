@@ -1,9 +1,8 @@
-import { databases } from "./appwrite";
-import { Query } from "appwrite";
+import { tablesDB, Query } from "./appwrite";
 
 // Configuración de la base de datos
 const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID;
-const COLLECTIONS = {
+const TABLES = {
   ENTITIES: "entities",
   CLAIMS: "claims",
   QUALIFIERS: "qualifiers",
@@ -18,10 +17,10 @@ const COLLECTIONS = {
  * Obtiene una entidad por su ID con todas sus relaciones
  */
 export async function getEntity(entityId, includeRelations = true) {
-  const result = await databases.getDocument({
+  const result = await tablesDB.getRow({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.ENTITIES,
-    documentId: entityId,
+    tableId: TABLES.ENTITIES,
+    rowId: entityId,
   });
 
   if (includeRelations) {
@@ -51,9 +50,9 @@ export async function searchEntities(searchTerm, limit = 20, offset = 0) {
     ]));
   }
 
-  const result = await databases.listDocuments({
+  const result = await tablesDB.listRows({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.ENTITIES,
+    tableId: TABLES.ENTITIES,
     queries,
   });
 
@@ -64,9 +63,9 @@ export async function searchEntities(searchTerm, limit = 20, offset = 0) {
  * Lista todas las entidades con paginación
  */
 export async function listEntities(limit = 25, offset = 0) {
-  const result = await databases.listDocuments({
+  const result = await tablesDB.listRows({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.ENTITIES,
+    tableId: TABLES.ENTITIES,
     queries: [
       Query.limit(limit),
       Query.offset(offset),
@@ -81,10 +80,10 @@ export async function listEntities(limit = 25, offset = 0) {
  * Crea una nueva entidad
  */
 export async function createEntity(data) {
-  const result = await databases.createDocument({
+  const result = await tablesDB.createRow({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.ENTITIES,
-    documentId: "unique()",
+    tableId: TABLES.ENTITIES,
+    rowId: "unique()",
     data: {
       label: data.label || null,
       description: data.description || null,
@@ -99,10 +98,10 @@ export async function createEntity(data) {
  * Actualiza una entidad existente
  */
 export async function updateEntity(entityId, data) {
-  const result = await databases.updateDocument({
+  const result = await tablesDB.updateRow({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.ENTITIES,
-    documentId: entityId,
+    tableId: TABLES.ENTITIES,
+    rowId: entityId,
     data,
   });
 
@@ -115,28 +114,34 @@ export async function updateEntity(entityId, data) {
 
 /**
  * Obtiene todos los claims de un sujeto (entidad)
+ * Incluye los datos expandidos de property y value_relation
  */
 export async function getClaimsBySubject(subjectId) {
-  const result = await databases.listDocuments({
+  const result = await tablesDB.listRows({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.CLAIMS,
+    tableId: TABLES.CLAIMS,
     queries: [
       Query.equal("subject", subjectId),
+      Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
       Query.limit(100),
     ],
   });
 
-  return result.documents;
+  return result.rows;
 }
 
 /**
  * Obtiene un claim específico con sus qualifiers y references
+ * Incluye los datos expandidos de las relaciones
  */
 export async function getClaim(claimId) {
-  const claim = await databases.getDocument({
+  const claim = await tablesDB.getRow({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.CLAIMS,
-    documentId: claimId,
+    tableId: TABLES.CLAIMS,
+    rowId: claimId,
+    queries: [
+      Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
+    ],
   });
 
   // Obtener qualifiers
@@ -154,10 +159,10 @@ export async function getClaim(claimId) {
  * Crea un nuevo claim
  */
 export async function createClaim(data) {
-  const result = await databases.createDocument({
+  const result = await tablesDB.createRow({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.CLAIMS,
-    documentId: "unique()",
+    tableId: TABLES.CLAIMS,
+    rowId: "unique()",
     data: {
       subject: data.subject || null,
       property: data.property || null,
@@ -175,28 +180,30 @@ export async function createClaim(data) {
 
 /**
  * Obtiene los qualifiers de un claim
+ * Incluye los datos expandidos de property y value_relation
  */
 export async function getQualifiersByClaim(claimId) {
-  const result = await databases.listDocuments({
+  const result = await tablesDB.listRows({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.QUALIFIERS,
+    tableId: TABLES.QUALIFIERS,
     queries: [
       Query.equal("claim", claimId),
+      Query.select(["*", "property.*", "value_relation.*"]),
       Query.limit(50),
     ],
   });
 
-  return result.documents;
+  return result.rows;
 }
 
 /**
  * Crea un nuevo qualifier
  */
 export async function createQualifier(data) {
-  const result = await databases.createDocument({
+  const result = await tablesDB.createRow({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.QUALIFIERS,
-    documentId: "unique()",
+    tableId: TABLES.QUALIFIERS,
+    rowId: "unique()",
     data: {
       claim: data.claim || null,
       property: data.property || null,
@@ -214,28 +221,30 @@ export async function createQualifier(data) {
 
 /**
  * Obtiene las referencias de un claim
+ * Incluye los datos expandidos de reference (entidad relacionada)
  */
 export async function getReferencesByClaim(claimId) {
-  const result = await databases.listDocuments({
+  const result = await tablesDB.listRows({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.REFERENCES,
+    tableId: TABLES.REFERENCES,
     queries: [
       Query.equal("claim", claimId),
+      Query.select(["*", "reference.*"]),
       Query.limit(50),
     ],
   });
 
-  return result.documents;
+  return result.rows;
 }
 
 /**
  * Crea una nueva referencia
  */
 export async function createReference(data) {
-  const result = await databases.createDocument({
+  const result = await tablesDB.createRow({
     databaseId: DATABASE_ID,
-    collectionId: COLLECTIONS.REFERENCES,
-    documentId: "unique()",
+    tableId: TABLES.REFERENCES,
+    rowId: "unique()",
     data: {
       claim: data.claim || null,
       details: data.details || null,
