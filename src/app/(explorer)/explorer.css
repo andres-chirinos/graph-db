@@ -1723,6 +1723,10 @@
   content: "📥";
 }
 
+.icon-maximize::before {
+  content: "⛶";
+}
+
 .logout-btn {
   color: var(--color-error);
 }
