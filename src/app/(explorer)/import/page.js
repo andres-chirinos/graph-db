@@ -59,6 +59,14 @@ export default function ImportPage() {
   const [relationReconcile, setRelationReconcile] = useState({});
   const [reconcileStep, setReconcileStep] = useState("entities"); // "entities" | "relations"
   
+  // Claims/Qualifiers/References estáticos (se aplican a todas las entidades)
+  const [staticClaims, setStaticClaims] = useState([]);
+  // Cada staticClaim: { id, propertyId, propertyLabel, dataType, value, createProperty }
+  
+  // Tipo de archivo importado
+  const [fileType, setFileType] = useState(""); // "csv" | "xlsx" | "geojson"
+  const [geometryColumn, setGeometryColumn] = useState(""); // Para GeoJSON: columna donde se guarda la geometría
+  
   // Importación
   const [importProgress, setImportProgress] = useState(0);
   const [importResults, setImportResults] = useState({ created: 0, updated: 0, errors: [] });
@@ -95,13 +103,25 @@ export default function ImportPage() {
         // Inicializar mapeo de columnas
         const initialMapping = {};
         cols.forEach((col) => {
-          initialMapping[col] = {
-            enabled: true,
-            propertyId: null,
-            propertyLabel: col,
-            dataType: guessDataType(data, col),
-            createProperty: true,
-          };
+          // Detectar columna de geometría de GeoJSON
+          if (col === "_geometry") {
+            initialMapping[col] = {
+              enabled: true,
+              propertyId: null,
+              propertyLabel: "Geometría",
+              dataType: "polygon",
+              createProperty: true,
+            };
+            setGeometryColumn(col);
+          } else {
+            initialMapping[col] = {
+              enabled: true,
+              propertyId: null,
+              propertyLabel: col,
+              dataType: guessDataType(data, col),
+              createProperty: true,
+            };
+          }
         });
         setColumnMapping(initialMapping);
         
@@ -125,17 +145,81 @@ export default function ImportPage() {
     }
   }
 
-  // Leer archivo CSV o XLSX
-  async function readFile(file) {
+  // Opciones de parseo
+  const [parseOptions, setParseOptions] = useState({
+    rawStrings: true, // Mantener valores como string (ej: 010101 no se convierte a 10101)
+    dateNF: "", // Formato de fecha personalizado
+    skipEmptyRows: true, // Omitir filas vacías
+  });
+
+  // Leer archivo CSV, XLSX o GeoJSON
+  async function readFile(file, options = parseOptions) {
+    const fileName = file.name.toLowerCase();
+    
+    // Detectar si es GeoJSON
+    if (fileName.endsWith('.geojson') || fileName.endsWith('.json')) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+          try {
+            const geojson = JSON.parse(e.target.result);
+            
+            // Verificar que sea un FeatureCollection válido
+            if (geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
+              // Podría ser un solo Feature
+              if (geojson.type === 'Feature' && geojson.properties) {
+                const row = { ...geojson.properties, _geometry: geojson.geometry };
+                setFileType("geojson");
+                resolve([row]);
+                return;
+              }
+              reject(new Error('El archivo JSON no es un GeoJSON válido'));
+              return;
+            }
+            
+            // Convertir features a filas planas
+            const rows = geojson.features.map((feature) => ({
+              ...feature.properties,
+              _geometry: feature.geometry, // Guardar la geometría como columna especial
+            }));
+            
+            setFileType("geojson");
+            resolve(rows);
+          } catch (err) {
+            reject(new Error('Error al parsear el archivo JSON: ' + err.message));
+          }
+        };
+        
+        reader.onerror = () => reject(new Error("Error al leer el archivo"));
+        reader.readAsText(file);
+      });
+    }
+    
+    // CSV o XLSX
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       
       reader.onload = (e) => {
         try {
           const data = e.target.result;
-          const workbook = XLSX.read(data, { type: "array" });
+          // Opciones de lectura: raw para mantener strings, dateNF para formato de fecha
+          const readOptions = { 
+            type: "array",
+            raw: options.rawStrings, // Mantener valores crudos como strings
+            dateNF: options.dateNF || undefined,
+          };
+          const workbook = XLSX.read(data, readOptions);
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+          
+          // Opciones de conversión a JSON
+          const jsonOptions = { 
+            defval: "",
+            raw: options.rawStrings, // Mantener valores crudos
+            blankrows: !options.skipEmptyRows,
+          };
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet, jsonOptions);
+          setFileType(fileName.endsWith('.csv') ? "csv" : "xlsx");
           resolve(jsonData);
         } catch (err) {
           reject(err);
@@ -196,11 +280,40 @@ export default function ImportPage() {
     }));
   }
 
-  // Buscar propiedades existentes
+  // Añadir un claim estático
+  function addStaticClaim() {
+    setStaticClaims((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        propertyId: null,
+        propertyLabel: "",
+        dataType: "string",
+        value: "",
+        createProperty: true,
+      },
+    ]);
+  }
+
+  // Actualizar un claim estático
+  function updateStaticClaim(id, updates) {
+    setStaticClaims((prev) =>
+      prev.map((claim) =>
+        claim.id === id ? { ...claim, ...updates } : claim
+      )
+    );
+  }
+
+  // Eliminar un claim estático
+  function removeStaticClaim(id) {
+    setStaticClaims((prev) => prev.filter((claim) => claim.id !== id));
+  }
+
+  // Buscar propiedades existentes (entidades que pueden ser usadas como propiedades)
   async function searchProperties(query) {
-    if (!query || query.length < 2) return [];
     try {
-      const results = await searchEntities(query, 10);
+      // Si no hay query, devolver las entidades más recientes
+      const results = await searchEntities(query || "", 15);
       return results.rows || [];
     } catch (err) {
       console.error("Error searching properties:", err);
@@ -406,6 +519,27 @@ export default function ImportPage() {
       }
     }
     
+    // Crear propiedades para claims estáticos
+    const staticPropertyMap = {};
+    for (const claim of staticClaims) {
+      if (!claim.propertyLabel && !claim.propertyId) continue;
+      
+      if (claim.createProperty && !claim.propertyId) {
+        try {
+          const property = await createEntity({
+            label: claim.propertyLabel,
+            description: `Propiedad estática importada`,
+            aliases: [],
+          }, teamId);
+          staticPropertyMap[claim.id] = property.$id;
+        } catch (err) {
+          results.errors.push(`Error creando propiedad estática ${claim.propertyLabel}: ${err.message}`);
+        }
+      } else if (claim.propertyId) {
+        staticPropertyMap[claim.id] = claim.propertyId;
+      }
+    }
+    
     // Crear entidades de relación que deben crearse (createNew = true)
     for (const [column, values] of Object.entries(relationReconcile)) {
       for (const [value, info] of Object.entries(values)) {
@@ -470,38 +604,73 @@ export default function ImportPage() {
           if (!propertyId) continue;
           
           try {
-            let claimValue;
+            let claimData;
             
             // Para columnas tipo entity, obtener el ID de la entidad relacionada
             if (mapping.dataType === "entity") {
               const valueStr = String(value).trim();
               const relationInfo = relationReconcile[column]?.[valueStr];
               
+              let relationId = null;
               if (relationInfo?.skip) {
                 continue; // Saltar este claim
               } else if (relationInfo?.selectedMatch) {
-                claimValue = relationInfo.selectedMatch.$id;
+                relationId = relationInfo.selectedMatch.$id;
               } else if (createdRelationEntities[`${column}:${valueStr}`]) {
-                claimValue = createdRelationEntities[`${column}:${valueStr}`];
-              } else {
+                relationId = createdRelationEntities[`${column}:${valueStr}`];
+              }
+              
+              if (!relationId) {
                 // No hay entidad, saltar
                 continue;
               }
+              
+              // Para relaciones, usar value_relation
+              claimData = {
+                subject: entityId,
+                property: propertyId,
+                value_relation: relationId,
+              };
             } else {
-              claimValue = formatValue(value, mapping.dataType);
+              // Para otros tipos de datos, usar value_raw con el formato {datatype, value}
+              const formattedValue = formatValue(value, mapping.dataType);
+              claimData = {
+                subject: entityId,
+                property: propertyId,
+                value_raw: {
+                  datatype: mapping.dataType,
+                  value: formattedValue,
+                },
+              };
             }
-            
-            const claimData = {
-              subject: entityId,
-              property: propertyId,
-              datatype: mapping.dataType,
-              value: claimValue,
-            };
             
             await createClaim(claimData, teamId);
             results.claims++;
           } catch (err) {
             results.errors.push(`Fila ${i + 1}, columna ${column}: ${err.message}`);
+          }
+        }
+        
+        // Crear claims estáticos para esta entidad
+        for (const claim of staticClaims) {
+          const staticPropertyId = staticPropertyMap[claim.id];
+          if (!staticPropertyId || !claim.value) continue;
+          
+          try {
+            const formattedValue = formatValue(claim.value, claim.dataType);
+            const staticClaimData = {
+              subject: entityId,
+              property: staticPropertyId,
+              value_raw: {
+                datatype: claim.dataType,
+                value: formattedValue,
+              },
+            };
+            
+            await createClaim(staticClaimData, teamId);
+            results.claims++;
+          } catch (err) {
+            results.errors.push(`Fila ${i + 1}, claim estático ${claim.propertyLabel}: ${err.message}`);
           }
         }
       } catch (err) {
@@ -528,9 +697,26 @@ export default function ImportPage() {
       case "coordinate":
         const parts = String(value).split(",").map((p) => parseFloat(p.trim()));
         return JSON.stringify({ lat: parts[0], lng: parts[1] });
-      case "json":
+      case "polygon":
+        // Para polígonos (GeoJSON), comprimir el JSON (sin espacios)
+        if (typeof value === "object") {
+          return JSON.stringify(value); // Ya comprimido (sin espacios)
+        }
         try {
-          return typeof value === "string" ? value : JSON.stringify(value);
+          // Parsear y re-stringify para comprimir
+          const parsed = JSON.parse(value);
+          return JSON.stringify(parsed); // Comprimido
+        } catch {
+          return String(value);
+        }
+      case "json":
+        // Comprimir JSON (sin espacios)
+        if (typeof value === "object") {
+          return JSON.stringify(value);
+        }
+        try {
+          const parsed = JSON.parse(value);
+          return JSON.stringify(parsed); // Comprimido
         } catch {
           return String(value);
         }
@@ -543,6 +729,7 @@ export default function ImportPage() {
   function resetWizard() {
     setCurrentStep(STEPS.UPLOAD);
     setFileName("");
+    setFileType("");
     setRawData([]);
     setHeaders([]);
     setPreviewRows([]);
@@ -550,9 +737,11 @@ export default function ImportPage() {
     setLabelColumn("");
     setDescriptionColumn("");
     setAliasesColumn("");
+    setGeometryColumn("");
     setReconcileResults({});
     setRelationReconcile({});
     setReconcileStep("entities");
+    setStaticClaims([]);
     setReconcileProgress(0);
     setImportProgress(0);
     setImportResults({ created: 0, updated: 0, relationsCreated: 0, claims: 0, errors: [] });
@@ -626,15 +815,43 @@ export default function ImportPage() {
               <div className="upload-zone">
                 <div className="upload-icon">📁</div>
                 <h3>Subir archivo</h3>
-                <p>Arrastra un archivo CSV o Excel aquí, o haz clic para seleccionar</p>
+                <p>Arrastra un archivo CSV, Excel o GeoJSON aquí, o haz clic para seleccionar</p>
                 <input
                   type="file"
-                  accept=".csv,.xlsx,.xls"
+                  accept=".csv,.xlsx,.xls,.geojson,.json"
                   onChange={handleFileUpload}
                   className="file-input"
                 />
                 <div className="file-types">
-                  Formatos soportados: CSV, XLSX, XLS
+                  Formatos soportados: CSV, XLSX, XLS, GeoJSON
+                </div>
+              </div>
+              
+              <div className="parse-options">
+                <h3>Opciones de Lectura</h3>
+                <div className="parse-options-grid">
+                  <label className="checkbox-option">
+                    <input
+                      type="checkbox"
+                      checked={parseOptions.rawStrings}
+                      onChange={(e) => setParseOptions(prev => ({ ...prev, rawStrings: e.target.checked }))}
+                    />
+                    <div className="option-content">
+                      <span className="option-label">Mantener valores como texto</span>
+                      <span className="option-desc">Evita que códigos como "010101" se conviertan a números (10101)</span>
+                    </div>
+                  </label>
+                  <label className="checkbox-option">
+                    <input
+                      type="checkbox"
+                      checked={parseOptions.skipEmptyRows}
+                      onChange={(e) => setParseOptions(prev => ({ ...prev, skipEmptyRows: e.target.checked }))}
+                    />
+                    <div className="option-content">
+                      <span className="option-label">Omitir filas vacías</span>
+                      <span className="option-desc">Ignora las filas que no tienen datos</span>
+                    </div>
+                  </label>
                 </div>
               </div>
             </div>
@@ -763,6 +980,34 @@ export default function ImportPage() {
                 </div>
               </div>
 
+              {/* Claims estáticos */}
+              <div className="mapping-section">
+                <h3>Claims Estáticos</h3>
+                <p className="section-desc">
+                  Añade propiedades con valores fijos que se aplicarán a todas las entidades importadas
+                </p>
+
+                <div className="static-claims-list">
+                  {staticClaims.map((claim) => (
+                    <StaticClaimRow
+                      key={claim.id}
+                      claim={claim}
+                      onUpdate={(updates) => updateStaticClaim(claim.id, updates)}
+                      onRemove={() => removeStaticClaim(claim.id)}
+                      onSearchProperties={searchProperties}
+                    />
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-add-static"
+                  onClick={addStaticClaim}
+                >
+                  + Añadir claim estático
+                </button>
+              </div>
+
               <div className="step-actions">
                 <button className="btn btn-secondary" onClick={() => setCurrentStep(STEPS.PREVIEW)}>
                   ← Volver
@@ -795,23 +1040,29 @@ export default function ImportPage() {
                 </div>
               ) : (
                 <>
-                  {/* Tabs para cambiar entre entidades y relaciones */}
-                  {Object.keys(relationReconcile).length > 0 && (
-                    <div className="reconcile-tabs">
-                      <button
-                        className={`reconcile-tab ${reconcileStep === "entities" ? "active" : ""}`}
-                        onClick={() => setReconcileStep("entities")}
-                      >
-                        Entidades Principales ({Object.keys(reconcileResults).length})
-                      </button>
+                  {/* Tabs para cambiar entre entidades, relaciones y preview */}
+                  <div className="reconcile-tabs">
+                    <button
+                      className={`reconcile-tab ${reconcileStep === "entities" ? "active" : ""}`}
+                      onClick={() => setReconcileStep("entities")}
+                    >
+                      Entidades ({Object.keys(reconcileResults).length})
+                    </button>
+                    {Object.keys(relationReconcile).length > 0 && (
                       <button
                         className={`reconcile-tab ${reconcileStep === "relations" ? "active" : ""}`}
                         onClick={() => setReconcileStep("relations")}
                       >
                         Relaciones ({Object.values(relationReconcile).reduce((acc, col) => acc + Object.keys(col).length, 0)})
                       </button>
-                    </div>
-                  )}
+                    )}
+                    <button
+                      className={`reconcile-tab ${reconcileStep === "preview" ? "active" : ""}`}
+                      onClick={() => setReconcileStep("preview")}
+                    >
+                      Vista Previa
+                    </button>
+                  </div>
 
                   {/* Sección de entidades principales */}
                   {reconcileStep === "entities" && (
@@ -959,6 +1210,121 @@ export default function ImportPage() {
                         ))}
                       </div>
                     </>
+                  )}
+
+                  {/* Vista previa de cómo quedará la importación */}
+                  {reconcileStep === "preview" && (
+                    <div className="reconcile-preview">
+                      <div className="preview-info">
+                        <p>Vista previa de cómo se importarán los datos. Las filas marcadas en amarillo requieren atención manual.</p>
+                      </div>
+                      
+                      <div className="preview-table-container reconcile-preview-table">
+                        <table className="preview-table">
+                          <thead>
+                            <tr>
+                              <th className="status-col">Estado</th>
+                              <th>{labelColumn || "Label"}</th>
+                              {descriptionColumn && <th>Descripción</th>}
+                              {headers
+                                .filter((h) => h !== labelColumn && h !== descriptionColumn && h !== aliasesColumn && columnMapping[h]?.enabled)
+                                .slice(0, 5)
+                                .map((h) => (
+                                  <th key={h}>{columnMapping[h]?.propertyLabel || h}</th>
+                                ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rawData.slice(0, 20).map((row, i) => {
+                              const label = String(row[labelColumn] || "").trim();
+                              const reconcileInfo = reconcileResults[label];
+                              const needsAttention = !label || 
+                                (reconcileInfo?.matches?.length > 1 && !reconcileInfo?.selectedMatch && !reconcileInfo?.createNew);
+                              const isExisting = reconcileInfo?.selectedMatch && !reconcileInfo?.createNew;
+                              const isNew = reconcileInfo?.createNew;
+                              
+                              return (
+                                <tr key={i} className={needsAttention ? "needs-attention" : (isExisting ? "is-existing" : "is-new")}>
+                                  <td className="status-col">
+                                    {!label && <span className="status-error" title="Sin label">⚠️</span>}
+                                    {needsAttention && label && <span className="status-warning" title="Requiere revisión">⚡</span>}
+                                    {isExisting && <span className="status-existing" title="Entidad existente">🔗</span>}
+                                    {isNew && <span className="status-new" title="Se creará nueva">✚</span>}
+                                  </td>
+                                  <td>
+                                    <div className="preview-cell-content">
+                                      <span className="label-value">{label || "(vacío)"}</span>
+                                      {isExisting && (
+                                        <span className="linked-to">→ {reconcileInfo.selectedMatch.label}</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  {descriptionColumn && (
+                                    <td title={String(row[descriptionColumn] || "")}>
+                                      {truncate(String(row[descriptionColumn] || ""), 30)}
+                                    </td>
+                                  )}
+                                  {headers
+                                    .filter((h) => h !== labelColumn && h !== descriptionColumn && h !== aliasesColumn && columnMapping[h]?.enabled)
+                                    .slice(0, 5)
+                                    .map((h) => {
+                                      const value = row[h];
+                                      const mapping = columnMapping[h];
+                                      const isEntityCol = mapping?.dataType === "entity";
+                                      let cellStatus = "";
+                                      let cellContent = truncate(String(value || ""), 25);
+                                      
+                                      if (isEntityCol && value) {
+                                        const valueStr = String(value).trim();
+                                        const relInfo = relationReconcile[h]?.[valueStr];
+                                        if (relInfo?.skip) {
+                                          cellStatus = "skipped";
+                                          cellContent = <span className="cell-skipped">{valueStr} (omitido)</span>;
+                                        } else if (relInfo?.selectedMatch) {
+                                          cellStatus = "linked";
+                                          cellContent = <span className="cell-linked">→ {relInfo.selectedMatch.label}</span>;
+                                        } else if (relInfo?.createNew) {
+                                          cellStatus = "new";
+                                          cellContent = <span className="cell-new">✚ {valueStr}</span>;
+                                        }
+                                      }
+                                      
+                                      return (
+                                        <td key={h} className={`cell-${cellStatus}`} title={String(value || "")}>
+                                          {cellContent}
+                                        </td>
+                                      );
+                                    })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      
+                      {rawData.length > 20 && (
+                        <p className="preview-note">Mostrando 20 de {rawData.length} filas</p>
+                      )}
+                      
+                      <div className="preview-legend">
+                        <div className="legend-item">
+                          <span className="status-new">✚</span>
+                          <span>Nueva entidad</span>
+                        </div>
+                        <div className="legend-item">
+                          <span className="status-existing">🔗</span>
+                          <span>Vinculada a existente</span>
+                        </div>
+                        <div className="legend-item">
+                          <span className="status-warning">⚡</span>
+                          <span>Requiere revisión</span>
+                        </div>
+                        <div className="legend-item">
+                          <span className="status-error">⚠️</span>
+                          <span>Error / Sin datos</span>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   <div className="step-actions">
@@ -1206,6 +1572,67 @@ export default function ImportPage() {
           color: var(--color-text-muted, #72777d);
         }
 
+        /* Opciones de parseo */
+        .parse-options {
+          margin-top: 2rem;
+          padding: 1.5rem;
+          background: var(--color-bg, #f8f9fa);
+          border-radius: var(--radius-md, 4px);
+          border: 1px solid var(--color-border-light, #c8ccd1);
+        }
+
+        .parse-options h3 {
+          margin: 0 0 1rem 0;
+          font-size: 1rem;
+          color: var(--color-text, #202122);
+        }
+
+        .parse-options-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 1rem;
+        }
+
+        .checkbox-option {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.75rem;
+          padding: 0.75rem;
+          background: var(--color-bg-card, #ffffff);
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-sm, 2px);
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .checkbox-option:hover {
+          border-color: var(--color-primary, #0645ad);
+        }
+
+        .checkbox-option input[type="checkbox"] {
+          margin-top: 0.125rem;
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+        }
+
+        .option-content {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .option-label {
+          font-weight: 600;
+          font-size: 0.875rem;
+          color: var(--color-text, #202122);
+        }
+
+        .option-desc {
+          font-size: 0.75rem;
+          color: var(--color-text-muted, #72777d);
+        }
+
         .preview-table-container {
           overflow-x: auto;
           border: 1px solid var(--color-border-light, #c8ccd1);
@@ -1297,6 +1724,19 @@ export default function ImportPage() {
         .column-mapping-list {
           display: flex;
           flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .static-claims-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          margin-bottom: 1rem;
+        }
+
+        .btn-add-static {
+          display: inline-flex;
+          align-items: center;
           gap: 0.5rem;
         }
 
@@ -1503,6 +1943,113 @@ export default function ImportPage() {
           color: var(--color-text-muted, #72777d);
         }
 
+        /* Vista previa de reconciliación */
+        .reconcile-preview {
+          margin-top: 1rem;
+        }
+
+        .preview-info {
+          padding: 1rem;
+          background: rgba(6, 69, 173, 0.05);
+          border: 1px solid rgba(6, 69, 173, 0.2);
+          border-radius: var(--radius-md, 4px);
+          margin-bottom: 1rem;
+        }
+
+        .preview-info p {
+          margin: 0;
+          font-size: 0.875rem;
+          color: var(--color-text-secondary, #54595d);
+        }
+
+        .reconcile-preview-table {
+          max-height: 500px;
+          overflow: auto;
+        }
+
+        .reconcile-preview-table .status-col {
+          width: 50px;
+          text-align: center;
+        }
+
+        .reconcile-preview-table tr.needs-attention {
+          background: rgba(255, 204, 51, 0.15);
+        }
+
+        .reconcile-preview-table tr.is-existing {
+          background: rgba(6, 69, 173, 0.05);
+        }
+
+        .reconcile-preview-table tr.is-new {
+          background: rgba(20, 134, 109, 0.05);
+        }
+
+        .preview-cell-content {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .label-value {
+          font-weight: 500;
+        }
+
+        .linked-to {
+          font-size: 0.75rem;
+          color: var(--color-primary, #0645ad);
+        }
+
+        .cell-linked {
+          color: var(--color-primary, #0645ad);
+          font-size: 0.8125rem;
+        }
+
+        .cell-new {
+          color: var(--color-success, #14866d);
+          font-size: 0.8125rem;
+          font-weight: 500;
+        }
+
+        .cell-skipped {
+          color: var(--color-text-muted, #72777d);
+          font-style: italic;
+          font-size: 0.8125rem;
+        }
+
+        .status-error {
+          color: var(--color-error, #d33);
+        }
+
+        .status-warning {
+          color: #b58105;
+        }
+
+        .status-existing {
+          color: var(--color-primary, #0645ad);
+        }
+
+        .status-new {
+          color: var(--color-success, #14866d);
+        }
+
+        .preview-legend {
+          display: flex;
+          gap: 1.5rem;
+          margin-top: 1rem;
+          padding: 0.75rem 1rem;
+          background: var(--color-bg, #f8f9fa);
+          border-radius: var(--radius-md, 4px);
+          flex-wrap: wrap;
+        }
+
+        .legend-item {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.8125rem;
+          color: var(--color-text-secondary, #54595d);
+        }
+
         .complete-header {
           text-align: center;
         }
@@ -1676,15 +2223,34 @@ function ColumnMappingRow({ column, mapping, onUpdate, onSearchProperties, sampl
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Cargar sugerencias iniciales cuando se abre el buscador
+  async function openSearch() {
+    setShowSearch(true);
+    if (searchResults.length === 0) {
+      setIsLoading(true);
+      try {
+        const results = await onSearchProperties("");
+        setSearchResults(results);
+      } catch (err) {
+        console.error("Error loading properties:", err);
+      }
+      setIsLoading(false);
+    }
+  }
 
   async function handleSearch(query) {
     setSearchQuery(query);
-    if (query.length >= 2) {
+    setIsLoading(true);
+    try {
       const results = await onSearchProperties(query);
       setSearchResults(results);
-    } else {
+    } catch (err) {
+      console.error("Error searching properties:", err);
       setSearchResults([]);
     }
+    setIsLoading(false);
   }
 
   function selectProperty(property) {
@@ -1727,7 +2293,7 @@ function ColumnMappingRow({ column, mapping, onUpdate, onSearchProperties, sampl
             />
             <button 
               className="link-btn"
-              onClick={() => setShowSearch(true)}
+              onClick={openSearch}
               title="Buscar propiedad existente"
             >
               🔗
@@ -1748,21 +2314,36 @@ function ColumnMappingRow({ column, mapping, onUpdate, onSearchProperties, sampl
         
         {showSearch && (
           <div className="property-search-dropdown">
+            <div className="search-header">
+              <span className="search-title">Seleccionar propiedad existente</span>
+            </div>
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Buscar propiedad..."
+              placeholder="Buscar propiedad por nombre..."
               autoFocus
             />
             <div className="search-results">
-              {searchResults.map((p) => (
-                <button key={p.$id} onClick={() => selectProperty(p)}>
-                  {p.label}
-                </button>
-              ))}
-              {searchQuery.length >= 2 && searchResults.length === 0 && (
-                <p className="no-results">No se encontraron propiedades</p>
+              {isLoading && <p className="loading-results">Cargando...</p>}
+              {!isLoading && searchResults.length > 0 && (
+                <>
+                  <p className="results-hint">Selecciona una propiedad:</p>
+                  {searchResults.map((p) => (
+                    <button key={p.$id} onClick={() => selectProperty(p)} className="property-option">
+                      <span className="property-option-label">{p.label}</span>
+                      {p.description && (
+                        <span className="property-option-desc">{truncate(p.description, 50)}</span>
+                      )}
+                    </button>
+                  ))}
+                </>
+              )}
+              {!isLoading && searchQuery.length >= 2 && searchResults.length === 0 && (
+                <p className="no-results">No se encontraron propiedades con "{searchQuery}"</p>
+              )}
+              {!isLoading && searchQuery.length === 0 && searchResults.length === 0 && (
+                <p className="no-results">No hay entidades disponibles</p>
               )}
             </div>
             <button className="close-search" onClick={() => setShowSearch(false)}>
@@ -1877,6 +2458,338 @@ function ColumnMappingRow({ column, mapping, onUpdate, onSearchProperties, sampl
           box-shadow: var(--shadow-lg, 0 4px 16px rgba(0,0,0,0.15));
           z-index: 100;
           padding: 0.5rem;
+          min-width: 300px;
+        }
+
+        .search-header {
+          padding: 0.5rem;
+          border-bottom: 1px solid var(--color-border-light, #c8ccd1);
+          margin-bottom: 0.5rem;
+        }
+
+        .search-title {
+          font-weight: 600;
+          font-size: 0.875rem;
+          color: var(--color-text, #202122);
+        }
+
+        .property-search-dropdown input {
+          width: 100%;
+          padding: 0.5rem;
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-sm, 2px);
+          margin-bottom: 0.5rem;
+        }
+
+        .search-results {
+          max-height: 200px;
+          overflow-y: auto;
+        }
+
+        .loading-results,
+        .results-hint {
+          font-size: 0.75rem;
+          color: var(--color-text-muted, #72777d);
+          padding: 0.25rem 0.5rem;
+          margin: 0;
+        }
+
+        .property-option {
+          display: flex;
+          flex-direction: column;
+          gap: 0.125rem;
+          width: 100%;
+          text-align: left;
+          padding: 0.625rem 0.5rem;
+          border: none;
+          background: none;
+          cursor: pointer;
+          border-radius: var(--radius-sm, 2px);
+          transition: background 0.15s;
+        }
+
+        .property-option:hover {
+          background: var(--color-bg-alt, #eaecf0);
+        }
+
+        .property-option-label {
+          font-weight: 500;
+          color: var(--color-text, #202122);
+          font-size: 0.875rem;
+        }
+
+        .property-option-desc {
+          font-size: 0.75rem;
+          color: var(--color-text-muted, #72777d);
+        }
+
+        .no-results {
+          font-size: 0.875rem;
+          color: var(--color-text-muted, #72777d);
+          text-align: center;
+          padding: 0.5rem;
+          margin: 0;
+        }
+
+        .close-search {
+          width: 100%;
+          padding: 0.5rem;
+          margin-top: 0.5rem;
+          background: none;
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-sm, 2px);
+          cursor: pointer;
+          font-size: 0.875rem;
+        }
+
+        .column-datatype select {
+          width: 100%;
+          padding: 0.5rem;
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-sm, 2px);
+          font-size: 0.875rem;
+          background: var(--color-bg-card, #ffffff);
+        }
+
+        @media (max-width: 768px) {
+          .column-mapping-row {
+            grid-template-columns: 1fr;
+            gap: 0.5rem;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Componente para claim estático
+function StaticClaimRow({ claim, onUpdate, onRemove, onSearchProperties }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+
+  async function handleSearch(query) {
+    setSearchQuery(query);
+    if (query.length >= 2) {
+      const results = await onSearchProperties(query);
+      setSearchResults(results);
+    } else {
+      setSearchResults([]);
+    }
+  }
+
+  function selectProperty(property) {
+    onUpdate({
+      propertyId: property.$id,
+      propertyLabel: property.label,
+      createProperty: false,
+    });
+    setShowSearch(false);
+    setSearchQuery("");
+  }
+
+  function renderValueInput() {
+    switch (claim.dataType) {
+      case "boolean":
+        return (
+          <select
+            value={claim.value}
+            onChange={(e) => onUpdate({ value: e.target.value })}
+          >
+            <option value="">-- Seleccionar --</option>
+            <option value="true">Verdadero</option>
+            <option value="false">Falso</option>
+          </select>
+        );
+      case "number":
+        return (
+          <input
+            type="number"
+            step="any"
+            value={claim.value}
+            onChange={(e) => onUpdate({ value: e.target.value })}
+            placeholder="Valor numérico"
+          />
+        );
+      case "date":
+        return (
+          <input
+            type="date"
+            value={claim.value}
+            onChange={(e) => onUpdate({ value: e.target.value })}
+          />
+        );
+      case "color":
+        return (
+          <input
+            type="color"
+            value={claim.value || "#000000"}
+            onChange={(e) => onUpdate({ value: e.target.value })}
+          />
+        );
+      case "json":
+      case "polygon":
+        return (
+          <textarea
+            value={claim.value}
+            onChange={(e) => onUpdate({ value: e.target.value })}
+            placeholder={claim.dataType === "polygon" ? '{"type": "Polygon", ...}' : '{"key": "value"}'}
+            rows={3}
+          />
+        );
+      default:
+        return (
+          <input
+            type="text"
+            value={claim.value}
+            onChange={(e) => onUpdate({ value: e.target.value })}
+            placeholder="Valor"
+          />
+        );
+    }
+  }
+
+  return (
+    <div className="static-claim-row">
+      <div className="claim-property">
+        {claim.createProperty ? (
+          <div className="property-new">
+            <input
+              type="text"
+              value={claim.propertyLabel}
+              onChange={(e) => onUpdate({ propertyLabel: e.target.value })}
+              placeholder="Nombre de la propiedad"
+            />
+            <button 
+              className="link-btn"
+              onClick={() => setShowSearch(true)}
+              title="Buscar propiedad existente"
+            >
+              🔗
+            </button>
+          </div>
+        ) : (
+          <div className="property-selected">
+            <span className="property-label">{claim.propertyLabel}</span>
+            <button 
+              className="unlink-btn"
+              onClick={() => onUpdate({ propertyId: null, createProperty: true })}
+              title="Desvincular"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        
+        {showSearch && (
+          <div className="property-search-dropdown">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Buscar propiedad..."
+              autoFocus
+            />
+            <div className="search-results">
+              {searchResults.map((p) => (
+                <button key={p.$id} onClick={() => selectProperty(p)}>
+                  {p.label}
+                </button>
+              ))}
+              {searchQuery.length >= 2 && searchResults.length === 0 && (
+                <p className="no-results">No se encontraron propiedades</p>
+              )}
+            </div>
+            <button className="close-search" onClick={() => setShowSearch(false)}>
+              Cancelar
+            </button>
+          </div>
+        )}
+      </div>
+      
+      <div className="claim-datatype">
+        <select
+          value={claim.dataType}
+          onChange={(e) => onUpdate({ dataType: e.target.value, value: "" })}
+        >
+          {DATA_TYPES.filter(dt => dt.id !== "entity").map((dt) => (
+            <option key={dt.id} value={dt.id}>{dt.label}</option>
+          ))}
+        </select>
+      </div>
+      
+      <div className="claim-value">
+        {renderValueInput()}
+      </div>
+      
+      <button className="remove-btn" onClick={onRemove} title="Eliminar">
+        🗑️
+      </button>
+
+      <style jsx>{`
+        .static-claim-row {
+          display: grid;
+          grid-template-columns: 1fr 150px 1fr 40px;
+          gap: 1rem;
+          align-items: start;
+          padding: 0.75rem;
+          background: var(--color-bg, #f8f9fa);
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-md, 4px);
+          margin-bottom: 0.5rem;
+        }
+
+        .claim-property {
+          position: relative;
+        }
+
+        .property-new {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .property-new input {
+          flex: 1;
+          padding: 0.5rem;
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-sm, 2px);
+          font-size: 0.875rem;
+        }
+
+        .link-btn, .unlink-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-size: 1rem;
+          padding: 0.5rem;
+        }
+
+        .property-selected {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem;
+          background: rgba(6, 69, 173, 0.1);
+          border-radius: var(--radius-sm, 2px);
+        }
+
+        .property-label {
+          flex: 1;
+          font-weight: 500;
+          color: var(--color-primary, #0645ad);
+        }
+
+        .property-search-dropdown {
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          background: var(--color-bg-card, #ffffff);
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-md, 4px);
+          box-shadow: var(--shadow-lg, 0 4px 16px rgba(0,0,0,0.15));
+          z-index: 100;
+          padding: 0.5rem;
         }
 
         .property-search-dropdown input {
@@ -1925,7 +2838,10 @@ function ColumnMappingRow({ column, mapping, onUpdate, onSearchProperties, sampl
           font-size: 0.875rem;
         }
 
-        .column-datatype select {
+        .claim-datatype select,
+        .claim-value input,
+        .claim-value select,
+        .claim-value textarea {
           width: 100%;
           padding: 0.5rem;
           border: 1px solid var(--color-border-light, #c8ccd1);
@@ -1934,8 +2850,26 @@ function ColumnMappingRow({ column, mapping, onUpdate, onSearchProperties, sampl
           background: var(--color-bg-card, #ffffff);
         }
 
+        .claim-value textarea {
+          resize: vertical;
+          min-height: 60px;
+        }
+
+        .remove-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-size: 1.25rem;
+          padding: 0.5rem;
+          opacity: 0.6;
+        }
+
+        .remove-btn:hover {
+          opacity: 1;
+        }
+
         @media (max-width: 768px) {
-          .column-mapping-row {
+          .static-claim-row {
             grid-template-columns: 1fr;
             gap: 0.5rem;
           }
