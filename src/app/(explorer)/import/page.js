@@ -482,12 +482,14 @@ export default function ImportPage() {
     
     if (useAdvancedSearch) {
       // Procesar fila por fila porque cada fila puede tener valores diferentes para las condiciones
-      const rowsToProcess = rawData.map((row, idx) => ({
-        row,
-        label: String(row[labelColumn] || "").trim(),
-        idx,
-      })).filter(r => r.label);
-      
+      const rowsToProcess = rawData
+        .map((row, idx) => ({
+          row,
+          label: String(row[labelColumn] || "").trim(),
+          idx,
+        }))
+        .filter((r) => r.label);
+
       // Agrupar por label para evitar duplicados en la UI
       const labelGroups = {};
       for (const item of rowsToProcess) {
@@ -496,7 +498,7 @@ export default function ImportPage() {
         }
         labelGroups[item.label].push(item.row);
       }
-      
+
       const uniqueLabels = Object.keys(labelGroups);
       
       await processBatches(
@@ -530,10 +532,17 @@ export default function ImportPage() {
               selectedMatch: bestMatch || (matchList.length === 1 ? matchList[0] : null),
               createNew: !bestMatch && matchList.length === 0,
               conditionsUsed: searchConditions.properties,
+              rows: labelGroups[label] || [],
             };
           } catch (err) {
             console.error(`Error reconciliando "${label}":`, err);
-            results[label] = { label, matches: [], selectedMatch: null, createNew: true };
+            results[label] = {
+              label,
+              matches: [],
+              selectedMatch: null,
+              createNew: true,
+              rows: labelGroups[label] || [],
+            };
           }
           return label;
         },
@@ -542,11 +551,17 @@ export default function ImportPage() {
       );
     } else {
       // Búsqueda simple por label/alias
-      const uniqueLabels = [...new Set(
-        rawData
-          .map((row) => String(row[labelColumn] || "").trim())
-          .filter(Boolean)
-      )];
+      const labelGroups = {};
+      for (const row of rawData) {
+        const label = String(row[labelColumn] || "").trim();
+        if (!label) continue;
+        if (!labelGroups[label]) {
+          labelGroups[label] = [];
+        }
+        labelGroups[label].push(row);
+      }
+
+      const uniqueLabels = Object.keys(labelGroups);
       
       await processBatches(
         uniqueLabels,
@@ -566,10 +581,17 @@ export default function ImportPage() {
               matches: matchList,
               selectedMatch: bestMatch || null,
               createNew: !bestMatch,
+              rows: labelGroups[label] || [],
             };
           } catch (err) {
             console.error(`Error reconciliando "${label}":`, err);
-            results[label] = { label, matches: [], selectedMatch: null, createNew: true };
+            results[label] = {
+              label,
+              matches: [],
+              selectedMatch: null,
+              createNew: true,
+              rows: labelGroups[label] || [],
+            };
           }
           return label;
         },
@@ -1053,8 +1075,12 @@ export default function ImportPage() {
     const formattedValue = formatValue(value, dataType);
     const valueStr = typeof formattedValue === "string" ? formattedValue : JSON.stringify(formattedValue);
     
-    // Verificar si debe subirse a bucket según el tamaño
-    if (valueStr.length > BUCKET_THRESHOLD) {
+    // SIEMPRE subir geometrías y JSON grandes al bucket para evitar límite de 2048 chars de Appwrite
+    const shouldUpload = 
+      (dataType === "polygon" || dataType === "geojson") || // Todas las geometrías al bucket
+      (valueStr.length > BUCKET_THRESHOLD); // O si supera el umbral para otros tipos
+    
+    if (shouldUpload) {
       try {
         if (dataType === "polygon" || dataType === "geojson") {
           // Subir GeoJSON a su bucket
@@ -1577,6 +1603,7 @@ export default function ImportPage() {
                                 <ReconcileRow
                                   key={label}
                                   result={result}
+                                  headers={headers}
                                   onUpdate={(updates) => updateReconcileResult(label, updates)}
                                 />
                               ))}
@@ -4834,8 +4861,13 @@ function StaticClaimRow({ claim, onUpdate, onRemove }) {
 }
 
 // Componente para fila de reconciliación
-function ReconcileRow({ result, onUpdate }) {
+function ReconcileRow({ result, headers, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
+  const displayHeaders = headers?.length
+    ? headers
+    : result.rows && result.rows.length > 0
+      ? Object.keys(result.rows[0])
+      : [];
 
   return (
     <div className="reconcile-row">
@@ -4855,6 +4887,36 @@ function ReconcileRow({ result, onUpdate }) {
         <button className="expand-btn">{expanded ? "▲" : "▼"}</button>
       </div>
       
+      {expanded && displayHeaders.length > 0 && result.rows?.length > 0 && (
+        <div className="reconcile-row-data">
+          <div className="option-header">
+            Datos de la fila ({result.rows.length})
+          </div>
+          <div className="reconcile-row-table-wrap">
+            <table className="reconcile-row-table">
+              <thead>
+                <tr>
+                  {displayHeaders.map((header) => (
+                    <th key={header}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {result.rows.map((row, rowIndex) => (
+                  <tr key={rowIndex}>
+                    {displayHeaders.map((header) => (
+                      <td key={header} title={String(row?.[header] ?? "")}>
+                        {String(row?.[header] ?? "")}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {expanded && result.matches.length > 0 && (
         <div className="reconcile-options">
           <div className="option-header">Coincidencias encontradas:</div>
@@ -4982,6 +5044,44 @@ function ReconcileRow({ result, onUpdate }) {
           padding: 1rem;
           border-top: 1px solid var(--color-border-light, #c8ccd1);
           background: var(--color-bg-card, #ffffff);
+        }
+
+        .reconcile-row-data {
+          padding: 1rem;
+          border-top: 1px solid var(--color-border-light, #c8ccd1);
+          background: var(--color-bg-card, #ffffff);
+        }
+
+        .reconcile-row-table-wrap {
+          overflow-x: auto;
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-sm, 2px);
+          background: var(--color-bg, #f8f9fa);
+        }
+
+        .reconcile-row-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 0.875rem;
+        }
+
+        .reconcile-row-table th,
+        .reconcile-row-table td {
+          padding: 0.5rem 0.75rem;
+          border-bottom: 1px solid var(--color-border-light, #c8ccd1);
+          text-align: left;
+          vertical-align: top;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+
+        .reconcile-row-table th {
+          background: var(--color-bg-alt, #eaecf0);
+          font-weight: 600;
+          color: var(--color-text, #202122);
+          position: sticky;
+          top: 0;
+          z-index: 1;
         }
 
         .option-header {
