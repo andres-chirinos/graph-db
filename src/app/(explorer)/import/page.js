@@ -707,6 +707,15 @@ export default function ImportPage() {
     }));
   }
   
+  // Actualizar valor de celda en rawData
+  function updateRawDataCell(rowIndex, column, newValue) {
+    setRawData((prev) => {
+      const updated = [...prev];
+      updated[rowIndex] = { ...updated[rowIndex], [column]: newValue };
+      return updated;
+    });
+  }
+  
   // Obtener el ID de entidad para un valor de relación
   function getRelationEntityId(column, value) {
     const info = relationReconcile[column]?.[value];
@@ -1716,26 +1725,27 @@ export default function ImportPage() {
                   {reconcileStep === "preview" && (
                     <div className="reconcile-preview">
                       <div className="preview-info">
-                        <p>Vista previa de cómo se importarán los datos. Las filas marcadas en amarillo requieren atención manual.</p>
+                        <p>Vista previa editable de los datos a importar. Puedes modificar cualquier celda antes de importar.</p>
                       </div>
                       
-                      <div className="preview-table-container reconcile-preview-table">
+                      <div className="preview-table-container reconcile-preview-table editable-preview">
                         <table className="preview-table">
                           <thead>
                             <tr>
+                              <th className="row-number-col">#</th>
                               <th className="status-col">Estado</th>
                               <th>{labelColumn || "Label"}</th>
                               {descriptionColumn && <th>Descripción</th>}
+                              {aliasesColumn && <th>Aliases</th>}
                               {headers
                                 .filter((h) => h !== labelColumn && h !== descriptionColumn && h !== aliasesColumn && columnMapping[h]?.enabled)
-                                .slice(0, 5)
                                 .map((h) => (
                                   <th key={h}>{columnMapping[h]?.propertyLabel || h}</th>
                                 ))}
                             </tr>
                           </thead>
                           <tbody>
-                            {rawData.slice(0, 20).map((row, i) => {
+                            {rawData.slice(0, 50).map((row, i) => {
                               const label = String(row[labelColumn] || "").trim();
                               const reconcileInfo = reconcileResults[label];
                               const needsAttention = !label || 
@@ -1745,6 +1755,7 @@ export default function ImportPage() {
                               
                               return (
                                 <tr key={i} className={needsAttention ? "needs-attention" : (isExisting ? "is-existing" : "is-new")}>
+                                  <td className="row-number-col">{i + 1}</td>
                                   <td className="status-col">
                                     {!label && <span className="status-error" title="Sin label">⚠️</span>}
                                     {needsAttention && label && <span className="status-warning" title="Requiere revisión">⚡</span>}
@@ -1752,46 +1763,55 @@ export default function ImportPage() {
                                     {isNew && <span className="status-new" title="Se creará nueva">✚</span>}
                                   </td>
                                   <td>
-                                    <div className="preview-cell-content">
-                                      <span className="label-value">{label || "(vacío)"}</span>
-                                      {isExisting && (
-                                        <span className="linked-to">→ {reconcileInfo.selectedMatch.label}</span>
-                                      )}
-                                    </div>
+                                    <EditableCell
+                                      value={row[labelColumn]}
+                                      rowIndex={i}
+                                      column={labelColumn}
+                                      dataType="string"
+                                      onUpdate={updateRawDataCell}
+                                    />
+                                    {isExisting && (
+                                      <div className="linked-to-badge">→ {reconcileInfo.selectedMatch.label}</div>
+                                    )}
                                   </td>
                                   {descriptionColumn && (
-                                    <td title={String(row[descriptionColumn] || "")}>
-                                      {truncate(String(row[descriptionColumn] || ""), 30)}
+                                    <td>
+                                      <EditableCell
+                                        value={row[descriptionColumn]}
+                                        rowIndex={i}
+                                        column={descriptionColumn}
+                                        dataType="string"
+                                        onUpdate={updateRawDataCell}
+                                      />
+                                    </td>
+                                  )}
+                                  {aliasesColumn && (
+                                    <td>
+                                      <EditableCell
+                                        value={row[aliasesColumn]}
+                                        rowIndex={i}
+                                        column={aliasesColumn}
+                                        dataType="string"
+                                        onUpdate={updateRawDataCell}
+                                      />
                                     </td>
                                   )}
                                   {headers
                                     .filter((h) => h !== labelColumn && h !== descriptionColumn && h !== aliasesColumn && columnMapping[h]?.enabled)
-                                    .slice(0, 5)
                                     .map((h) => {
-                                      const value = row[h];
                                       const mapping = columnMapping[h];
                                       const isEntityCol = mapping?.dataType === "entity";
-                                      let cellStatus = "";
-                                      let cellContent = truncate(String(value || ""), 25);
-                                      
-                                      if (isEntityCol && value) {
-                                        const valueStr = String(value).trim();
-                                        const relInfo = relationReconcile[h]?.[valueStr];
-                                        if (relInfo?.skip) {
-                                          cellStatus = "skipped";
-                                          cellContent = <span className="cell-skipped">{valueStr} (omitido)</span>;
-                                        } else if (relInfo?.selectedMatch) {
-                                          cellStatus = "linked";
-                                          cellContent = <span className="cell-linked">→ {relInfo.selectedMatch.label}</span>;
-                                        } else if (relInfo?.createNew) {
-                                          cellStatus = "new";
-                                          cellContent = <span className="cell-new">✚ {valueStr}</span>;
-                                        }
-                                      }
                                       
                                       return (
-                                        <td key={h} className={`cell-${cellStatus}`} title={String(value || "")}>
-                                          {cellContent}
+                                        <td key={h} className={isEntityCol ? "entity-cell" : ""}>
+                                          <EditableCell
+                                            value={row[h]}
+                                            rowIndex={i}
+                                            column={h}
+                                            dataType={mapping?.dataType || "string"}
+                                            isEntity={isEntityCol}
+                                            onUpdate={updateRawDataCell}
+                                          />
                                         </td>
                                       );
                                     })}
@@ -1802,8 +1822,8 @@ export default function ImportPage() {
                         </table>
                       </div>
                       
-                      {rawData.length > 20 && (
-                        <p className="preview-note">Mostrando 20 de {rawData.length} filas</p>
+                      {rawData.length > 50 && (
+                        <p className="preview-note">Mostrando 50 de {rawData.length} filas. Todos los datos se importarán.</p>
                       )}
                       
                       <div className="preview-legend">
@@ -2633,6 +2653,37 @@ export default function ImportPage() {
         .linked-to {
           font-size: 0.75rem;
           color: var(--color-primary, #0645ad);
+        }
+        
+        .linked-to-badge {
+          font-size: 0.75rem;
+          color: var(--color-primary, #0645ad);
+          margin-top: 0.25rem;
+          font-weight: normal;
+        }
+        
+        /* Tabla editable en vista previa */
+        .editable-preview table {
+          table-layout: auto;
+        }
+        
+        .editable-preview td {
+          padding: 0;
+          vertical-align: middle;
+        }
+        
+        .editable-preview .row-number-col {
+          width: 50px;
+          text-align: center;
+          font-size: 0.75rem;
+          color: var(--color-text-muted, #72777d);
+          font-weight: 600;
+          background: var(--color-bg-alt, #eaecf0);
+          padding: 0.5rem;
+        }
+        
+        .editable-preview .entity-cell {
+          min-width: 200px;
         }
 
         .cell-linked {
@@ -5139,6 +5190,184 @@ function ReconcileRow({ result, headers, onUpdate }) {
           font-size: 0.75rem;
           color: var(--color-text-muted, #72777d);
           margin-bottom: 0.5rem;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Componente de celda editable para vista previa
+function EditableCell({ value, rowIndex, column, dataType, isEntity, onUpdate }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSave = () => {
+    if (editValue !== value) {
+      onUpdate(rowIndex, column, editValue);
+    }
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      handleSave();
+    } else if (e.key === "Escape") {
+      setEditValue(value);
+      setIsEditing(false);
+    }
+  };
+
+  const handleEntitySelect = (entity) => {
+    onUpdate(rowIndex, column, entity.label);
+    setIsEditing(false);
+  };
+
+  if (isEntity) {
+    return (
+      <div className="editable-entity-cell">
+        {!isEditing ? (
+          <div
+            className="cell-display entity-display"
+            onClick={() => setIsEditing(true)}
+            title="Clic para editar"
+          >
+            {value || "(vacío)"}
+          </div>
+        ) : (
+          <div className="cell-edit entity-edit">
+            <EntitySelectorInline
+              onSelect={handleEntitySelect}
+              placeholder="Buscar o escribir..."
+            />
+            <button
+              className="cancel-edit-btn"
+              onClick={() => {
+                setEditValue(value);
+                setIsEditing(false);
+              }}
+              title="Cancelar"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        <style jsx>{`
+          .editable-entity-cell {
+            min-width: 150px;
+          }
+
+          .cell-display {
+            padding: 0.375rem 0.5rem;
+            cursor: pointer;
+            border-radius: 2px;
+            min-height: 28px;
+          }
+
+          .cell-display:hover {
+            background: var(--color-bg-alt, #eaecf0);
+          }
+
+          .entity-display {
+            font-weight: 500;
+            color: var(--color-primary, #0645ad);
+          }
+
+          .cell-edit {
+            display: flex;
+            gap: 0.25rem;
+            align-items: center;
+          }
+
+          .entity-edit {
+            position: relative;
+          }
+
+          .cancel-edit-btn {
+            background: var(--color-error, #d33);
+            color: white;
+            border: none;
+            border-radius: 2px;
+            padding: 0.375rem 0.5rem;
+            cursor: pointer;
+            font-size: 0.75rem;
+            flex-shrink: 0;
+          }
+
+          .cancel-edit-btn:hover {
+            background: var(--color-error-hover, #b32);
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  // Para otros tipos de datos, input normal
+  return (
+    <div className="editable-text-cell">
+      {!isEditing ? (
+        <div
+          className="cell-display"
+          onClick={() => setIsEditing(true)}
+          title="Clic para editar"
+        >
+          {value || "(vacío)"}
+        </div>
+      ) : (
+        <div className="cell-edit">
+          <input
+            ref={inputRef}
+            type="text"
+            value={editValue || ""}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={handleKeyDown}
+            className="edit-input"
+          />
+        </div>
+      )}
+      <style jsx>{`
+        .editable-text-cell {
+          min-width: 100px;
+        }
+
+        .cell-display {
+          padding: 0.375rem 0.5rem;
+          cursor: pointer;
+          border-radius: 2px;
+          min-height: 28px;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+
+        .cell-display:hover {
+          background: var(--color-bg-alt, #eaecf0);
+        }
+
+        .edit-input {
+          width: 100%;
+          padding: 0.375rem 0.5rem;
+          border: 1px solid var(--color-primary, #0645ad);
+          border-radius: 2px;
+          font-size: 0.875rem;
+          font-family: inherit;
+        }
+
+        .edit-input:focus {
+          outline: none;
+          border-color: var(--color-primary, #0645ad);
+          box-shadow: 0 0 0 1px var(--color-primary, #0645ad);
         }
       `}</style>
     </div>
