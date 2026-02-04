@@ -142,6 +142,8 @@ export default function ImportPage() {
   // Reconciliación de relaciones (columnas tipo entity)
   const [relationReconcile, setRelationReconcile] = useState({});
   const [reconcileStep, setReconcileStep] = useState("entities"); // "entities" | "relations"
+  const [modelRows, setModelRows] = useState([]);
+  const [modelReady, setModelReady] = useState(false);
   
   // Paginación de reconciliación de entidades
   const [entitiesPage, setEntitiesPage] = useState(1);
@@ -715,6 +717,67 @@ export default function ImportPage() {
       return updated;
     });
   }
+
+  // Inicializar modelo de importación editable
+  function initializeModelRows() {
+    if (modelReady) return;
+    const entityColumns = Object.entries(columnMapping)
+      .filter(([col, mapping]) => mapping?.enabled && mapping?.dataType === "entity")
+      .map(([col]) => col);
+
+    const initial = rawData.map((row, idx) => {
+      const label = String(row[labelColumn] || "").trim();
+      const reconcileInfo = reconcileResults[label];
+      const subjectEntity = reconcileInfo?.selectedMatch && !reconcileInfo?.createNew
+        ? reconcileInfo.selectedMatch
+        : null;
+
+      const relationOverrides = {};
+      for (const col of entityColumns) {
+        const valueStr = String(row[col] || "").trim();
+        const relInfo = relationReconcile[col]?.[valueStr];
+        if (relInfo?.selectedMatch) {
+          relationOverrides[col] = relInfo.selectedMatch;
+        }
+      }
+
+      return {
+        rowIndex: idx,
+        row: { ...row },
+        subjectEntity,
+        relationOverrides,
+      };
+    });
+
+    setModelRows(initial);
+    setModelReady(true);
+  }
+
+  function updateModelCell(rowIndex, column, newValue) {
+    setModelRows((prev) =>
+      prev.map((r) =>
+        r.rowIndex === rowIndex ? { ...r, row: { ...r.row, [column]: newValue } } : r
+      )
+    );
+  }
+
+  function updateModelSubjectEntity(rowIndex, entity) {
+    setModelRows((prev) =>
+      prev.map((r) =>
+        r.rowIndex === rowIndex ? { ...r, subjectEntity: entity } : r
+      )
+    );
+  }
+
+  function updateModelRelation(rowIndex, column, entity) {
+    setModelRows((prev) =>
+      prev.map((r) =>
+        r.rowIndex === rowIndex
+          ? { ...r, relationOverrides: { ...r.relationOverrides, [column]: entity } }
+          : r
+      )
+    );
+  }
   
   // Obtener el ID de entidad para un valor de relación
   function getRelationEntityId(column, value) {
@@ -732,7 +795,8 @@ export default function ImportPage() {
     
     const results = { created: 0, updated: 0, claims: 0, qualifiers: 0, references: 0, filesUploaded: 0, relationsCreated: 0, errors: [] };
     importResultsRef.current = results; // Guardar referencia para uso en funciones async
-    const total = rawData.length;
+    const rowsToImport = modelRows.length > 0 ? modelRows : rawData;
+    const total = rowsToImport.length;
     const teamId = activeTeam?.$id || null;
     
     // Mapa para guardar entidades de relación creadas durante la importación
@@ -826,8 +890,9 @@ export default function ImportPage() {
     );
     
     // Importar cada fila (procesamiento secuencial pero con retry)
-    for (let i = 0; i < rawData.length; i++) {
-      const row = rawData[i];
+    for (let i = 0; i < rowsToImport.length; i++) {
+      const model = modelRows.length > 0 ? rowsToImport[i] : null;
+      const row = modelRows.length > 0 ? model.row : rowsToImport[i];
       const label = String(row[labelColumn] || "").trim();
       
       if (!label) {
@@ -839,9 +904,13 @@ export default function ImportPage() {
       try {
         let entityId;
         const reconcileInfo = reconcileResults[label];
+        const subjectOverride = model?.subjectEntity || null;
         
         // Crear o usar entidad existente
-        if (reconcileInfo?.createNew || !reconcileInfo?.selectedMatch) {
+        if (subjectOverride) {
+          entityId = subjectOverride.$id;
+          results.updated++;
+        } else if (reconcileInfo?.createNew || !reconcileInfo?.selectedMatch) {
           const entityData = {
             label,
             description: descriptionColumn ? String(row[descriptionColumn] || "") : null,
@@ -877,10 +946,13 @@ export default function ImportPage() {
             if (mapping.dataType === "entity") {
               const valueStr = String(value).trim();
               const relationInfo = relationReconcile[column]?.[valueStr];
+              const overrideEntity = model?.relationOverrides?.[column] || null;
               
               let relationId = null;
               if (relationInfo?.skip) {
                 continue; // Saltar este claim
+              } else if (overrideEntity) {
+                relationId = overrideEntity.$id;
               } else if (relationInfo?.selectedMatch) {
                 relationId = relationInfo.selectedMatch.$id;
               } else if (createdRelationEntities[`${column}:${valueStr}`]) {
@@ -888,8 +960,23 @@ export default function ImportPage() {
               }
               
               if (!relationId) {
-                // No hay entidad, saltar
-                continue;
+                if (valueStr) {
+                  try {
+                    const entity = await withRetry(() => createEntity({
+                      label: valueStr,
+                      description: null,
+                      aliases: [],
+                    }, teamId));
+                    relationId = entity.$id;
+                    createdRelationEntities[`${column}:${valueStr}`] = entity.$id;
+                    results.relationsCreated++;
+                  } catch (relCreateErr) {
+                    results.errors.push(`Fila ${i + 1}, columna ${column}: ${relCreateErr.message}`);
+                    continue;
+                  }
+                } else {
+                  continue;
+                }
               }
               
               // Para relaciones, usar value_relation
@@ -1144,6 +1231,8 @@ export default function ImportPage() {
     setReconcileResults({});
     setRelationReconcile({});
     setReconcileStep("entities");
+    setModelRows([]);
+    setModelReady(false);
     setStaticClaims([]);
     setReconcileConditions([]);
     setReconcileProgress(0);
@@ -1520,6 +1609,15 @@ export default function ImportPage() {
                     >
                       Vista Previa
                     </button>
+                    <button
+                      className={`reconcile-tab ${reconcileStep === "model" ? "active" : ""}`}
+                      onClick={() => {
+                        setReconcileStep("model");
+                        initializeModelRows();
+                      }}
+                    >
+                      Modelado
+                    </button>
                   </div>
 
                   {/* Sección de entidades principales */}
@@ -1844,6 +1942,118 @@ export default function ImportPage() {
                           <span>Error / Sin datos</span>
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Modelado editable de importación */}
+                  {reconcileStep === "model" && (
+                    <div className="reconcile-preview">
+                      <div className="preview-info">
+                        <p>Modela la importación antes de ejecutarla. Puedes editar celdas por tipo y definir la entidad subject y relaciones.</p>
+                      </div>
+
+                      <div className="preview-table-container reconcile-preview-table editable-preview">
+                        <table className="preview-table">
+                          <thead>
+                            <tr>
+                              <th className="row-number-col">#</th>
+                              <th>Subject</th>
+                              <th>{labelColumn || "Label"}</th>
+                              {descriptionColumn && <th>Descripción</th>}
+                              {aliasesColumn && <th>Aliases</th>}
+                              {headers
+                                .filter((h) => h !== labelColumn && h !== descriptionColumn && h !== aliasesColumn && columnMapping[h]?.enabled)
+                                .map((h) => (
+                                  <th key={h}>{columnMapping[h]?.propertyLabel || h}</th>
+                                ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {modelRows.slice(0, 50).map((model) => {
+                              const row = model.row;
+                              const label = String(row[labelColumn] || "").trim();
+
+                              return (
+                                <tr key={model.rowIndex}>
+                                  <td className="row-number-col">{model.rowIndex + 1}</td>
+                                  <td className="subject-cell">
+                                    <div className="subject-selector">
+                                      <EntitySelectorInline
+                                        onSelect={(entity) => updateModelSubjectEntity(model.rowIndex, entity)}
+                                        placeholder="Buscar subject..."
+                                      />
+                                      {model.subjectEntity && (
+                                        <span className="subject-linked">→ {model.subjectEntity.label}</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <EditableCell
+                                      value={row[labelColumn]}
+                                      rowIndex={model.rowIndex}
+                                      column={labelColumn}
+                                      dataType="string"
+                                      onUpdate={updateModelCell}
+                                    />
+                                    {label && !model.subjectEntity && (
+                                      <div className="subject-new-hint">Se creará: {label}</div>
+                                    )}
+                                  </td>
+                                  {descriptionColumn && (
+                                    <td>
+                                      <EditableCell
+                                        value={row[descriptionColumn]}
+                                        rowIndex={model.rowIndex}
+                                        column={descriptionColumn}
+                                        dataType="string"
+                                        onUpdate={updateModelCell}
+                                      />
+                                    </td>
+                                  )}
+                                  {aliasesColumn && (
+                                    <td>
+                                      <EditableCell
+                                        value={row[aliasesColumn]}
+                                        rowIndex={model.rowIndex}
+                                        column={aliasesColumn}
+                                        dataType="string"
+                                        onUpdate={updateModelCell}
+                                      />
+                                    </td>
+                                  )}
+                                  {headers
+                                    .filter((h) => h !== labelColumn && h !== descriptionColumn && h !== aliasesColumn && columnMapping[h]?.enabled)
+                                    .map((h) => {
+                                      const mapping = columnMapping[h];
+                                      const isEntityCol = mapping?.dataType === "entity";
+
+                                      return (
+                                        <td key={h} className={isEntityCol ? "entity-cell" : ""}>
+                                          <EditableCell
+                                            value={row[h]}
+                                            rowIndex={model.rowIndex}
+                                            column={h}
+                                            dataType={mapping?.dataType || "string"}
+                                            isEntity={isEntityCol}
+                                            onUpdate={updateModelCell}
+                                            onSelectEntity={(entity) => updateModelRelation(model.rowIndex, h, entity)}
+                                          />
+                                          {isEntityCol && model.relationOverrides?.[h] && (
+                                            <div className="relation-linked">→ {model.relationOverrides[h].label}</div>
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {modelRows.length > 50 && (
+                        <p className="preview-note">Mostrando 50 de {modelRows.length} filas. Todos los datos se importarán.</p>
+                      )}
                     </div>
                   )}
 
@@ -2684,6 +2894,33 @@ export default function ImportPage() {
         
         .editable-preview .entity-cell {
           min-width: 200px;
+        }
+
+        .editable-preview .subject-cell {
+          min-width: 260px;
+        }
+
+        .subject-selector {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .subject-linked {
+          font-size: 0.75rem;
+          color: var(--color-primary, #0645ad);
+        }
+
+        .subject-new-hint {
+          font-size: 0.75rem;
+          color: var(--color-success, #14866d);
+          margin-top: 0.25rem;
+        }
+
+        .relation-linked {
+          font-size: 0.75rem;
+          color: var(--color-primary, #0645ad);
+          margin-top: 0.25rem;
         }
 
         .cell-linked {
@@ -5197,7 +5434,7 @@ function ReconcileRow({ result, headers, onUpdate }) {
 }
 
 // Componente de celda editable para vista previa
-function EditableCell({ value, rowIndex, column, dataType, isEntity, onUpdate }) {
+function EditableCell({ value, rowIndex, column, dataType, isEntity, onUpdate, onSelectEntity }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const inputRef = useRef(null);
@@ -5231,6 +5468,9 @@ function EditableCell({ value, rowIndex, column, dataType, isEntity, onUpdate })
 
   const handleEntitySelect = (entity) => {
     onUpdate(rowIndex, column, entity.label);
+    if (onSelectEntity) {
+      onSelectEntity(entity);
+    }
     setIsEditing(false);
   };
 
@@ -5247,10 +5487,26 @@ function EditableCell({ value, rowIndex, column, dataType, isEntity, onUpdate })
           </div>
         ) : (
           <div className="cell-edit entity-edit">
+            <input
+              ref={inputRef}
+              type="text"
+              value={editValue || ""}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="edit-input"
+              placeholder="Escribir valor..."
+            />
             <EntitySelectorInline
               onSelect={handleEntitySelect}
               placeholder="Buscar o escribir..."
             />
+            <button
+              className="save-edit-btn"
+              onClick={handleSave}
+              title="Guardar"
+            >
+              ✓
+            </button>
             <button
               className="cancel-edit-btn"
               onClick={() => {
@@ -5292,6 +5548,23 @@ function EditableCell({ value, rowIndex, column, dataType, isEntity, onUpdate })
 
           .entity-edit {
             position: relative;
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .save-edit-btn {
+            background: var(--color-success, #14866d);
+            color: white;
+            border: none;
+            border-radius: 2px;
+            padding: 0.375rem 0.5rem;
+            cursor: pointer;
+            font-size: 0.75rem;
+            flex-shrink: 0;
+          }
+
+          .save-edit-btn:hover {
+            background: #0f6c58;
           }
 
           .cancel-edit-btn {
@@ -5326,15 +5599,29 @@ function EditableCell({ value, rowIndex, column, dataType, isEntity, onUpdate })
         </div>
       ) : (
         <div className="cell-edit">
-          <input
-            ref={inputRef}
-            type="text"
-            value={editValue || ""}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={handleSave}
-            onKeyDown={handleKeyDown}
-            className="edit-input"
-          />
+          {dataType === "boolean" ? (
+            <select
+              ref={inputRef}
+              value={String(editValue || "")}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleSave}
+              className="edit-input"
+            >
+              <option value="">(vacío)</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          ) : (
+            <input
+              ref={inputRef}
+              type={dataType === "number" ? "number" : dataType === "date" ? "date" : "text"}
+              value={editValue || ""}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={handleKeyDown}
+              className="edit-input"
+            />
+          )}
         </div>
       )}
       <style jsx>{`
