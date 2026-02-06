@@ -70,7 +70,7 @@ export default function UserMenu({ onLoginClick }) {
           <div className="dropdown-header">
             <span>Cambiar equipo</span>
             <Link href="/teams" className="manage-teams-link" onClick={() => setShowTeamSelector(false)}>
-              Gestionar
+              Gestionar Equipos
             </Link>
           </div>
           {userTeams.length === 0 ? (
@@ -98,11 +98,6 @@ export default function UserMenu({ onLoginClick }) {
           )}
 
           <div className="dropdown-divider"></div>
-
-          <Link href="/teams" className="dropdown-item" onClick={() => setShowTeamSelector(false)}>
-            <span className="icon-team"></span>
-            Gestionar Equipos
-          </Link>
 
           {isAuthenticated && (
             <Link href="/import" className="dropdown-item" onClick={() => setShowTeamSelector(false)}>
