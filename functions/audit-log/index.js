@@ -143,9 +143,14 @@ module.exports = async ({ req, res, log, error }) => {
 
     const client = new sdk.Client()
       .setEndpoint(process.env.APPWRITE_ENDPOINT)
-      .setProject(process.env.APPWRITE_PROJECT_ID)
-      .setJWT(req.headers['x-appwrite-user-jwt']);
-      //.setKey(process.env.APPWRITE_API_KEY);
+      .setProject(process.env.APPWRITE_PROJECT_ID);
+
+    const userJwt = req?.headers?.["x-appwrite-user-jwt"];
+    if (userJwt) {
+      client.setJWT(userJwt);
+    } else if (process.env.APPWRITE_API_KEY) {
+      client.setKey(process.env.APPWRITE_API_KEY);
+    }
 
     const tablesDB = new sdk.TablesDB(client);
 
