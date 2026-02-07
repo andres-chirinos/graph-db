@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState } from "@/components";
+import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState, ValueRenderer } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import { 
   getEntity, 
@@ -35,6 +35,25 @@ export default function EntityPage({ params }) {
   const [usedAsProperty, setUsedAsProperty] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  function normalizeValue(valueRaw, datatype = "string") {
+    if (valueRaw === null || valueRaw === undefined) return null;
+    let data = valueRaw;
+    if (typeof valueRaw === "string") {
+      try {
+        const parsed = JSON.parse(valueRaw);
+        if (parsed && typeof parsed === "object" && parsed.datatype !== undefined && parsed.data !== undefined) {
+          return { datatype: parsed.datatype || datatype, data: parsed.data };
+        }
+        if (["json", "object", "array"].includes(datatype)) {
+          data = parsed;
+        }
+      } catch {
+        data = valueRaw;
+      }
+    }
+    return { datatype, data };
+  }
 
   // Permisos de edición basados en el contexto de autenticación
   const editable = canEdit || canCreate || canDelete;
@@ -376,7 +395,17 @@ export default function EntityPage({ params }) {
                       </Link>
                     ) : (
                       <span className="incoming-value-raw">
-                        {claim.value_raw || "(valor)"}
+                        {claim.value_raw !== null && claim.value_raw !== undefined ? (
+                          <ValueRenderer
+                            value={normalizeValue(
+                              claim.value_raw,
+                              claim.datatype || claim.property?.datatype || "string"
+                            )}
+                            compact
+                          />
+                        ) : (
+                          "(valor)"
+                        )}
                       </span>
                     )}
                   </div>

@@ -24,16 +24,8 @@ export default function QualifierForm({
     qualifier?.value_relation ? "relation" : "raw"
   );
   const [valueRaw, setValueRaw] = useState(() => {
-    if (qualifier?.value_raw) {
-      try {
-        return typeof qualifier.value_raw === "string" 
-          ? JSON.parse(qualifier.value_raw) 
-          : qualifier.value_raw;
-      } catch {
-        return { datatype: "string", data: qualifier.value_raw };
-      }
-    }
-    return { datatype: "string", data: "" };
+    const initialDatatype = qualifier?.datatype || qualifier?.property?.datatype || "string";
+    return normalizeInitialValue(qualifier?.value_raw, initialDatatype);
   });
   const [valueRelation, setValueRelation] = useState(
     qualifier?.value_relation?.$id || ""
@@ -47,7 +39,8 @@ export default function QualifierForm({
     try {
       const data = {
         property: property || null,
-        value_raw: valueType === "raw" ? valueRaw : null,
+        datatype: valueType === "raw" ? valueRaw?.datatype || "string" : null,
+        value_raw: valueType === "raw" ? valueRaw?.data ?? null : null,
         value_relation: valueType === "relation" ? valueRelation : null,
       };
 
@@ -134,4 +127,27 @@ export default function QualifierForm({
       )}
     </EditModal>
   );
+}
+
+function normalizeInitialValue(valueRaw, fallbackDatatype) {
+  if (valueRaw === undefined || valueRaw === null) {
+    return { datatype: fallbackDatatype, data: "" };
+  }
+
+  if (typeof valueRaw === "object" && valueRaw.datatype !== undefined && valueRaw.data !== undefined) {
+    return { datatype: valueRaw.datatype || fallbackDatatype, data: valueRaw.data };
+  }
+
+  if (typeof valueRaw === "string") {
+    try {
+      const parsed = JSON.parse(valueRaw);
+      if (parsed && typeof parsed === "object" && parsed.datatype !== undefined && parsed.data !== undefined) {
+        return { datatype: parsed.datatype || fallbackDatatype, data: parsed.data };
+      }
+    } catch {
+      // Ignorar
+    }
+  }
+
+  return { datatype: fallbackDatatype, data: valueRaw };
 }

@@ -4,7 +4,13 @@ Este sistema permite registrar plugins para renderizar diferentes tipos de datos
 
 ## Estructura de un value_raw
 
-Los valores `value_raw` deben tener la siguiente estructura JSON:
+Ahora el `datatype` es una columna separada, y `value_raw` contiene el valor real del dato.
+
+En la base de datos:
+- `datatype`: Identificador del tipo de dato (ej: "string", "date", "coordinate", "polygon")
+- `value_raw`: El valor real del dato
+
+En el sistema de plugins, se sigue usando un objeto con esta forma para renderizado:
 
 ```json
 {
@@ -12,10 +18,6 @@ Los valores `value_raw` deben tener la siguiente estructura JSON:
   "data": "valor del dato"
 }
 ```
-
-Donde:
-- `datatype`: Identificador del tipo de dato (ej: "string", "date", "coordinate", "polygon")
-- `data`: El valor real del dato
 
 ## Plugins Incluidos
 

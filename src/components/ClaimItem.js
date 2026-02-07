@@ -13,6 +13,27 @@ import {
   updateReferencePermissions,
 } from "@/lib/database";
 
+function normalizeValue(valueRaw, datatype = "string") {
+  if (valueRaw === null || valueRaw === undefined) return null;
+
+  let data = valueRaw;
+  if (typeof valueRaw === "string") {
+    try {
+      const parsed = JSON.parse(valueRaw);
+      if (parsed && typeof parsed === "object" && parsed.datatype !== undefined && parsed.data !== undefined) {
+        return { datatype: parsed.datatype || datatype, data: parsed.data };
+      }
+      if (["json", "object", "array"].includes(datatype)) {
+        data = parsed;
+      }
+    } catch {
+      data = valueRaw;
+    }
+  }
+
+  return { datatype, data };
+}
+
 /**
  * Muestra un claim individual con su propiedad, valor, qualifiers y referencias
  */
@@ -32,17 +53,10 @@ export default function ClaimItem({
 }) {
   if (!claim) return null;
 
-  const { $id, property, value_raw, value_relation, qualifiersList, referencesList } = claim;
+  const { $id, property, value_raw, value_relation, qualifiersList, referencesList, datatype } = claim;
 
-  // Parsear value_raw si es string
-  let parsedValue = null;
-  if (value_raw) {
-    try {
-      parsedValue = typeof value_raw === "string" ? JSON.parse(value_raw) : value_raw;
-    } catch (e) {
-      parsedValue = { datatype: "string", data: value_raw };
-    }
-  }
+  // Normalizar value_raw usando el datatype de la fila
+  const parsedValue = normalizeValue(value_raw, datatype || property?.datatype || "string");
 
   // Estados para modales
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -198,20 +212,13 @@ export default function ClaimItem({
  * Muestra un qualifier
  */
 function QualifierItem({ qualifier, editable, onEdit, onDelete }) {
-  const { property, value_raw, value_relation } = qualifier;
+  const { property, value_raw, value_relation, datatype } = qualifier;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showPermissions, setShowPermissions] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  let parsedValue = null;
-  if (value_raw) {
-    try {
-      parsedValue = typeof value_raw === "string" ? JSON.parse(value_raw) : value_raw;
-    } catch (e) {
-      parsedValue = { datatype: "string", data: value_raw };
-    }
-  }
+  const parsedValue = normalizeValue(value_raw, datatype || property?.datatype || "string");
 
   async function handleDelete() {
     setDeleting(true);

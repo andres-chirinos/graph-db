@@ -24,16 +24,8 @@ export default function ClaimForm({
     claim?.value_relation ? "relation" : "raw"
   );
   const [valueRaw, setValueRaw] = useState(() => {
-    if (claim?.value_raw) {
-      try {
-        return typeof claim.value_raw === "string" 
-          ? JSON.parse(claim.value_raw) 
-          : claim.value_raw;
-      } catch {
-        return { datatype: "string", data: claim.value_raw };
-      }
-    }
-    return { datatype: "string", data: "" };
+    const initialDatatype = claim?.datatype || claim?.property?.datatype || "string";
+    return normalizeInitialValue(claim?.value_raw, initialDatatype);
   });
   const [valueRelation, setValueRelation] = useState(
     claim?.value_relation?.$id || ""
@@ -47,7 +39,8 @@ export default function ClaimForm({
     try {
       const data = {
         property: property || null,
-        value_raw: valueType === "raw" ? valueRaw : null,
+        datatype: valueType === "raw" ? valueRaw?.datatype || "string" : null,
+        value_raw: valueType === "raw" ? valueRaw?.data ?? null : null,
         value_relation: valueType === "relation" ? valueRelation : null,
       };
 
@@ -135,4 +128,27 @@ export default function ClaimForm({
       )}
     </EditModal>
   );
+}
+
+function normalizeInitialValue(valueRaw, fallbackDatatype) {
+  if (valueRaw === undefined || valueRaw === null) {
+    return { datatype: fallbackDatatype, data: "" };
+  }
+
+  if (typeof valueRaw === "object" && valueRaw.datatype !== undefined && valueRaw.data !== undefined) {
+    return { datatype: valueRaw.datatype || fallbackDatatype, data: valueRaw.data };
+  }
+
+  if (typeof valueRaw === "string") {
+    try {
+      const parsed = JSON.parse(valueRaw);
+      if (parsed && typeof parsed === "object" && parsed.datatype !== undefined && parsed.data !== undefined) {
+        return { datatype: parsed.datatype || fallbackDatatype, data: parsed.data };
+      }
+    } catch {
+      // Ignorar
+    }
+  }
+
+  return { datatype: fallbackDatatype, data: valueRaw };
 }

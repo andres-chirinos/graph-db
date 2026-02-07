@@ -25,7 +25,22 @@ function renderCoordinate(data, options = {}) {
   } else if (typeof data === "object") {
     lat = data.latitude || data.lat;
     lng = data.longitude || data.lng || data.lon;
-  } else {
+  } else if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === "object") {
+        lat = parsed.latitude || parsed.lat;
+        lng = parsed.longitude || parsed.lng || parsed.lon;
+      }
+    } catch {
+      const parts = data.split(",").map((p) => parseFloat(p.trim()));
+      if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+        [lat, lng] = parts;
+      }
+    }
+  }
+
+  if (lat === undefined || lng === undefined) {
     return String(data);
   }
 

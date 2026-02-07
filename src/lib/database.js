@@ -156,21 +156,14 @@ export async function searchEntitiesByPropertyValue(propertyId, value, limit = 1
     // Filtrar en el cliente por valor (normalizado)
     const searchValue = String(value).toLowerCase().trim();
     const matchingClaims = claimsResult.rows.filter(claim => {
-      if (!claim.value_raw) return false;
+      if (claim.value_raw === null || claim.value_raw === undefined) return false;
       try {
-        // value_raw puede ser un JSON string o un valor directo
-        let rawValue = claim.value_raw;
-        if (typeof rawValue === "string") {
-          // Intentar parsear como JSON
-          try {
-            rawValue = JSON.parse(rawValue);
-          } catch {
-            // Si no es JSON, usar el string directamente
-          }
-        }
-        // Comparar como string normalizado
-        const claimValue = String(rawValue?.data ?? rawValue).toLowerCase().trim();
-        return claimValue.includes(searchValue) || searchValue.includes(claimValue);
+        const rawValue = claim.value_raw;
+        const claimValue = typeof rawValue === "string"
+          ? rawValue
+          : JSON.stringify(rawValue);
+        const normalized = String(claimValue).toLowerCase().trim();
+        return normalized.includes(searchValue) || searchValue.includes(normalized);
       } catch {
         return false;
       }
@@ -403,7 +396,8 @@ export async function createClaim(data, teamId = null) {
     data: {
       subject: data.subject || null,
       property: data.property || null,
-      value_raw: data.value_raw ? JSON.stringify(data.value_raw) : null,
+      datatype: data.datatype || null,
+      value_raw: data.value_raw ?? null,
       value_relation: data.value_relation || null,
     },
     permissions,
@@ -449,7 +443,8 @@ export async function createQualifier(data, teamId = null) {
     data: {
       claim: data.claim || null,
       property: data.property || null,
-      value_raw: data.value_raw ? JSON.stringify(data.value_raw) : null,
+      datatype: data.datatype || null,
+      value_raw: data.value_raw ?? null,
       value_relation: data.value_relation || null,
     },
     permissions,
@@ -545,8 +540,9 @@ export async function deleteReference(referenceId) {
 export async function updateQualifier(qualifierId, data) {
   const updateData = {};
   if (data.property !== undefined) updateData.property = data.property;
+  if (data.datatype !== undefined) updateData.datatype = data.datatype;
   if (data.value_raw !== undefined) {
-    updateData.value_raw = data.value_raw ? JSON.stringify(data.value_raw) : null;
+    updateData.value_raw = data.value_raw ?? null;
   }
   if (data.value_relation !== undefined) updateData.value_relation = data.value_relation;
 
@@ -584,8 +580,9 @@ export async function deleteQualifier(qualifierId) {
 export async function updateClaim(claimId, data) {
   const updateData = {};
   if (data.property !== undefined) updateData.property = data.property;
+  if (data.datatype !== undefined) updateData.datatype = data.datatype;
   if (data.value_raw !== undefined) {
-    updateData.value_raw = data.value_raw ? JSON.stringify(data.value_raw) : null;
+    updateData.value_raw = data.value_raw ?? null;
   }
   if (data.value_relation !== undefined) updateData.value_relation = data.value_relation;
 
@@ -657,28 +654,30 @@ export async function deleteEntity(entityId) {
 /**
  * Parsea un value_raw desde JSON string
  */
-export function parseValueRaw(valueRaw) {
-  if (!valueRaw) return null;
-  
-  try {
-    if (typeof valueRaw === "string") {
-      return JSON.parse(valueRaw);
+export function parseValueRaw(valueRaw, datatype = "string") {
+  if (valueRaw === null || valueRaw === undefined) return null;
+
+  let data = valueRaw;
+  if (typeof valueRaw === "string" && ["json", "object", "array"].includes(datatype)) {
+    try {
+      data = JSON.parse(valueRaw);
+    } catch {
+      data = valueRaw;
     }
-    return valueRaw;
-  } catch (e) {
-    // Si no es JSON válido, retornar como string simple
-    return { datatype: "string", data: valueRaw };
   }
+
+  return { datatype, data };
 }
 
 /**
  * Serializa un value para guardarlo como value_raw
  */
 export function serializeValue(value) {
-  if (typeof value === "string") {
-    return JSON.stringify({ datatype: "string", data: value });
+  if (!value) return null;
+  if (typeof value === "object" && value.datatype !== undefined && value.data !== undefined) {
+    return { datatype: value.datatype, value_raw: value.data };
   }
-  return JSON.stringify(value);
+  return { datatype: "string", value_raw: value };
 }
 
 // ============================================
