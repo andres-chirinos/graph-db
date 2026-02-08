@@ -200,9 +200,9 @@ module.exports = async ({ req, res, log, error }) => {
     const userId = body?.userId || body?.user?.$id || null;
     const userName = body?.user?.name || body?.user?.email || null;
     log(`audit-log: userId=${userId} userName=${userName}`);
-    
-    
-    const previousData = body?.previousData || null;
+
+
+    const previousData = reduceRelatedEntities(body) || null;
     log(`audit-log: previousData=${previousData ? "present" : "null"}`);
 
     const endpoint =
@@ -247,12 +247,10 @@ module.exports = async ({ req, res, log, error }) => {
         entity_id: entityId,
         user_id: userId,
         user_name: userName,
-        previous_data: previousData
-          ? JSON.stringify(reduceRelatedEntities(previousData))
-          : null,
-        new_data: payload
-          ? JSON.stringify(reduceRelatedEntities(stripSystemFields(payload)))
-          : null,
+        previous_data: JSON.stringify(previousData)
+          || null,
+        new_data: JSON.stringify(payload)
+          || null,
         metadata: JSON.stringify({
           event: eventName,
           collectionId,
