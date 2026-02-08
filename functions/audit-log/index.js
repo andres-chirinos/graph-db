@@ -24,6 +24,27 @@ function parseBody(body) {
   }
 }
 
+function safeStringify(value, maxLength) {
+  try {
+    const json = JSON.stringify(value);
+    if (!maxLength) return json;
+    return json.length > maxLength ? json.slice(0, maxLength) : json;
+  } catch {
+    return null;
+  }
+}
+
+function pickPreviousData(body) {
+  return (
+    body?.previous ||
+    body?.before ||
+    body?.old ||
+    body?.payload?.previous ||
+    body?.payload?.before ||
+    null
+  );
+}
+
 function extractEventName(req, body) {
   return (
     req?.headers?.["x-appwrite-event"] ||
@@ -153,6 +174,43 @@ function getApiKey(headers) {
   );
 }
 
+function extractUserInfo(req, body) {
+  const headers = req?.headers || {};
+  const userId =
+    body?.userId ||
+    body?.user?.$id ||
+    headers["x-appwrite-user-id"] ||
+    headers["X-Appwrite-User-Id"] ||
+    null;
+
+  const userEmail =
+    body?.user?.email ||
+    headers["x-appwrite-user-email"] ||
+    headers["X-Appwrite-User-Email"] ||
+    null;
+
+  const userName =
+    body?.user?.name ||
+    userEmail ||
+    headers["x-appwrite-user-name"] ||
+    headers["X-Appwrite-User-Name"] ||
+    null;
+
+  return { userId, userName, userEmail };
+}
+
+function extractTransactionId(req, body, payload) {
+  return (
+    body?.transactionId ||
+    body?.transaction?.$id ||
+    payload?.transactionId ||
+    payload?.$transactionId ||
+    req?.headers?.["x-appwrite-transaction-id"] ||
+    req?.headers?.["X-Appwrite-Transaction-Id"] ||
+    null
+  );
+}
+
 module.exports = async ({ req, res, log, error }) => {
   try {
     log("audit-log: start");
@@ -197,12 +255,13 @@ module.exports = async ({ req, res, log, error }) => {
     const entityId = extractDocumentId(payload, eventName);
     log(`audit-log: entityType=${entityType} entityId=${entityId}`);
 
-    const userId = body?.userId || body?.user?.$id || null;
-    const userName = body?.user?.name || body?.user?.email || null;
-    log(`audit-log: userId=${userId} userName=${userName}`);
+    const { userId, userName, userEmail } = extractUserInfo(req, body);
+    const transactionId = extractTransactionId(req, body, payload);
+    log(`audit-log: userId=${userId} userName=${userName} userEmail=${userEmail}`);
+    log(`audit-log: transactionId=${transactionId}`);
 
 
-    const previousData = reduceRelatedEntities(body) || null;
+    const previousData = reduceRelatedEntities(pickPreviousData(body) || body) || null;
     log(`audit-log: previousData=${previousData ? "present" : "null"}`);
 
     const endpoint =
@@ -237,6 +296,19 @@ module.exports = async ({ req, res, log, error }) => {
     const tablesDB = new sdk.TablesDB(client);
 
     log("audit-log: writing audit row");
+    const previousDataString = safeStringify(previousData, 10240);
+    const newDataString = safeStringify(payload, 1024);
+    const metadataString = safeStringify({
+      event: eventName,
+      collectionId,
+      entityId,
+      functionId: process.env.APPWRITE_FUNCTION_ID || null,
+      transactionId,
+      userId,
+      userName,
+      userEmail,
+    }, 1024);
+
     await tablesDB.createRow({
       databaseId: DATABASE_ID,
       tableId: AUDIT_LOG_TABLE,
@@ -247,16 +319,9 @@ module.exports = async ({ req, res, log, error }) => {
         entity_id: entityId,
         user_id: userId,
         user_name: userName,
-        previous_data: JSON.stringify(previousData)
-          || null,
-        new_data: JSON.stringify(payload)
-          || null,
-        metadata: JSON.stringify({
-          event: eventName,
-          collectionId,
-          entityId,
-          functionId: process.env.APPWRITE_FUNCTION_ID || null,
-        }),
+        previous_data: previousDataString || null,
+        new_data: newDataString || null,
+        metadata: metadataString || null,
       },
     });
     log("audit-log: write successful");

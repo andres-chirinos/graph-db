@@ -1,4 +1,5 @@
 import { tablesDB, Query, Permission, Role, storage, ID } from "./appwrite";
+import { getCurrentUser } from "./auth";
 
 // Configuración de la base de datos
 const DATABASE_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID;
@@ -8,6 +9,9 @@ const TABLES = {
   QUALIFIERS: "qualifiers",
   REFERENCES: "references",
 };
+
+const AUDIT_TABLE_ID = process.env.NEXT_PUBLIC_AUDIT_TABLE_ID;
+const MAIN_TEAM_ID = process.env.NEXT_PUBLIC_MAIN_TEAM_ID;
 
 const SYSTEM_FIELDS = new Set([
   "$id",
@@ -62,7 +66,97 @@ function stripSystemFields(row) {
   return data;
 }
 
-async function updateRowPermissions(tableId, rowId, permissions) {
+const TRANSACTION_LOG_KEY = "graphdb_transaction_logs";
+
+function wrapTransactionResult(result, changes = []) {
+  return { __changes: changes, result };
+}
+
+function getLocalTransactionLogs() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(TRANSACTION_LOG_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (error) {
+    console.warn("[DB] Failed to read transaction logs:", error);
+    return [];
+  }
+}
+
+function saveLocalTransactionLogs(logs) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(TRANSACTION_LOG_KEY, JSON.stringify(logs));
+  } catch (error) {
+    console.warn("[DB] Failed to save transaction logs:", error);
+  }
+}
+
+function addLocalTransactionLog(entry) {
+  const logs = getLocalTransactionLogs();
+  const next = [entry, ...logs].slice(0, 200);
+  saveLocalTransactionLogs(next);
+}
+
+export function listLocalTransactionLogs() {
+  return getLocalTransactionLogs();
+}
+
+function isAuditEnabled() {
+  return !!AUDIT_TABLE_ID;
+}
+
+function buildAuditPermissions() {
+  if (MAIN_TEAM_ID) {
+    return [
+      Permission.read(Role.team(MAIN_TEAM_ID)),
+      Permission.update(Role.team(MAIN_TEAM_ID)),
+      Permission.delete(Role.team(MAIN_TEAM_ID)),
+    ];
+  }
+  return undefined;
+}
+
+async function createAuditEntry({
+  action,
+  tableId,
+  rowId,
+  before,
+  after,
+  status = "pending",
+  transactionId,
+  changes,
+  note,
+  relatedAuditId,
+}) {
+  if (!isAuditEnabled()) return null;
+
+  const user = await getCurrentUser();
+  const permissions = buildAuditPermissions();
+
+  return tablesDB.createRow({
+    databaseId: DATABASE_ID,
+    tableId: AUDIT_TABLE_ID,
+    rowId: "unique()",
+    data: {
+      action,
+      tableId,
+      rowId,
+      before: before ?? null,
+      after: after ?? null,
+      status,
+      transactionId: transactionId || null,
+      changes: changes || [],
+      userId: user?.$id || null,
+      userEmail: user?.email || null,
+      note: note || null,
+      relatedAuditId: relatedAuditId || null,
+    },
+    permissions,
+  });
+}
+
+async function updateRowPermissions(tableId, rowId, permissions, transactionId = null) {
   const row = await tablesDB.getRow({
     databaseId: DATABASE_ID,
     tableId,
@@ -75,7 +169,49 @@ async function updateRowPermissions(tableId, rowId, permissions) {
     rowId,
     data,
     permissions,
+    transactionId: transactionId || undefined,
   });
+}
+
+async function runWithTransaction(label, handler) {
+  const tx = await tablesDB.createTransaction();
+  console.log(`[DB] Transaction started: ${tx.$id} - ${label}`);
+  try {
+    const output = await handler(tx.$id);
+    const changes = output?.__changes || [];
+    const result = output?.__changes ? output.result : output;
+    await tablesDB.updateTransaction({
+      transactionId: tx.$id,
+      commit: true,
+    });
+    console.log(`[DB] Transaction committed: ${tx.$id} - ${label}`);
+    addLocalTransactionLog({
+      id: tx.$id,
+      label,
+      status: "committed",
+      createdAt: new Date().toISOString(),
+      changes,
+    });
+    return result;
+  } catch (error) {
+    try {
+      await tablesDB.updateTransaction({
+        transactionId: tx.$id,
+        rollback: true,
+      });
+      console.log(`[DB] Transaction rolled back: ${tx.$id} - ${label}`);
+      addLocalTransactionLog({
+        id: tx.$id,
+        label,
+        status: "rolledback",
+        createdAt: new Date().toISOString(),
+        changes: [],
+      });
+    } catch (rollbackError) {
+      console.error("[DB] Transaction rollback failed:", rollbackError);
+    }
+    throw error;
+  }
 }
 
 // ============================================
@@ -262,41 +398,97 @@ export async function listEntities(limit = 25, offset = 0) {
  */
 export async function createEntity(data, teamId = null) {
   const permissions = generatePermissions(teamId);
-  
-  const result = await tablesDB.createRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.ENTITIES,
-    rowId: "unique()",
-    data: {
-      label: data.label || null,
-      description: data.description || null,
-      aliases: data.aliases || [],
-    },
-    permissions,
-  });
 
-  return result;
+  return runWithTransaction("createEntity", async (transactionId) => {
+    const result = await tablesDB.createRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.ENTITIES,
+      rowId: "unique()",
+      data: {
+        label: data.label || null,
+        description: data.description || null,
+        aliases: data.aliases || [],
+      },
+      permissions,
+      transactionId,
+    });
+
+    const after = stripSystemFields(result);
+    await createAuditEntry({
+      action: "create",
+      tableId: TABLES.ENTITIES,
+      rowId: result?.$id,
+      before: null,
+      after,
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "create", table: TABLES.ENTITIES, rowId: result?.$id || "" },
+    ]);
+  });
 }
 
 /**
  * Actualiza una entidad existente
  */
 export async function updateEntity(entityId, data) {
-  const result = await tablesDB.updateRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.ENTITIES,
-    rowId: entityId,
-    data,
-  });
+  return runWithTransaction("updateEntity", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+    });
 
-  return result;
+    const result = await tablesDB.updateRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+      data,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "update",
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "update", table: TABLES.ENTITIES, rowId: entityId },
+    ]);
+  });
 }
 
 /**
  * Actualiza permisos de una entidad
  */
 export async function updateEntityPermissions(entityId, permissions) {
-  return updateRowPermissions(TABLES.ENTITIES, entityId, permissions);
+  return runWithTransaction("updateEntityPermissions", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+    });
+
+    const result = await updateRowPermissions(TABLES.ENTITIES, entityId, permissions, transactionId);
+
+    await createAuditEntry({
+      action: "updatePermissions",
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "updatePermissions", table: TABLES.ENTITIES, rowId: entityId },
+    ]);
+  });
 }
 
 // ============================================
@@ -389,22 +581,36 @@ export async function getClaim(claimId) {
 export async function createClaim(data, teamId = null) {
   const permissions = generatePermissions(teamId);
   const datatype = data.datatype ?? (data.value_relation ? "relation" : "string");
-  
-  const result = await tablesDB.createRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.CLAIMS,
-    rowId: "unique()",
-    data: {
-      subject: data.subject || null,
-      property: data.property || null,
-      datatype: datatype,
-      value_raw: data.value_raw ?? null,
-      value_relation: data.value_relation || null,
-    },
-    permissions,
-  });
 
-  return result;
+  return runWithTransaction("createClaim", async (transactionId) => {
+    const result = await tablesDB.createRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      rowId: "unique()",
+      data: {
+        subject: data.subject || null,
+        property: data.property || null,
+        datatype: datatype,
+        value_raw: data.value_raw ?? null,
+        value_relation: data.value_relation || null,
+      },
+      permissions,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "create",
+      tableId: TABLES.CLAIMS,
+      rowId: result?.$id,
+      before: null,
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "create", table: TABLES.CLAIMS, rowId: result?.$id || "" },
+    ]);
+  });
 }
 
 // ============================================
@@ -437,22 +643,36 @@ export async function getQualifiersByClaim(claimId) {
 export async function createQualifier(data, teamId = null) {
   const permissions = generatePermissions(teamId);
   const datatype = data.datatype ?? (data.value_relation ? "relation" : "string");
-  
-  const result = await tablesDB.createRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.QUALIFIERS,
-    rowId: "unique()",
-    data: {
-      claim: data.claim || null,
-      property: data.property || null,
-      datatype: datatype,
-      value_raw: data.value_raw ?? null,
-      value_relation: data.value_relation || null,
-    },
-    permissions,
-  });
 
-  return result;
+  return runWithTransaction("createQualifier", async (transactionId) => {
+    const result = await tablesDB.createRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.QUALIFIERS,
+      rowId: "unique()",
+      data: {
+        claim: data.claim || null,
+        property: data.property || null,
+        datatype: datatype,
+        value_raw: data.value_raw ?? null,
+        value_relation: data.value_relation || null,
+      },
+      permissions,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "create",
+      tableId: TABLES.QUALIFIERS,
+      rowId: result?.$id,
+      before: null,
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "create", table: TABLES.QUALIFIERS, rowId: result?.$id || "" },
+    ]);
+  });
 }
 
 // ============================================
@@ -484,20 +704,34 @@ export async function getReferencesByClaim(claimId) {
  */
 export async function createReference(data, teamId = null) {
   const permissions = generatePermissions(teamId);
-  
-  const result = await tablesDB.createRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.REFERENCES,
-    rowId: "unique()",
-    data: {
-      claim: data.claim || null,
-      details: data.details || null,
-      reference: data.reference || null,
-    },
-    permissions,
-  });
 
-  return result;
+  return runWithTransaction("createReference", async (transactionId) => {
+    const result = await tablesDB.createRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.REFERENCES,
+      rowId: "unique()",
+      data: {
+        claim: data.claim || null,
+        details: data.details || null,
+        reference: data.reference || null,
+      },
+      permissions,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "create",
+      tableId: TABLES.REFERENCES,
+      rowId: result?.$id,
+      before: null,
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "create", table: TABLES.REFERENCES, rowId: result?.$id || "" },
+    ]);
+  });
 }
 
 /**
@@ -508,31 +742,94 @@ export async function updateReference(referenceId, data) {
   if (data.details !== undefined) updateData.details = data.details;
   if (data.reference !== undefined) updateData.reference = data.reference;
 
-  const result = await tablesDB.updateRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.REFERENCES,
-    rowId: referenceId,
-    data: updateData,
-  });
+  return runWithTransaction("updateReference", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+    });
 
-  return result;
+    const result = await tablesDB.updateRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+      data: updateData,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "update",
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "update", table: TABLES.REFERENCES, rowId: referenceId },
+    ]);
+  });
 }
 
 /**
  * Actualiza permisos de una referencia
  */
 export async function updateReferencePermissions(referenceId, permissions) {
-  return updateRowPermissions(TABLES.REFERENCES, referenceId, permissions);
+  return runWithTransaction("updateReferencePermissions", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+    });
+
+    const result = await updateRowPermissions(TABLES.REFERENCES, referenceId, permissions, transactionId);
+
+    await createAuditEntry({
+      action: "updatePermissions",
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "updatePermissions", table: TABLES.REFERENCES, rowId: referenceId },
+    ]);
+  });
 }
 
 /**
  * Elimina una referencia
  */
 export async function deleteReference(referenceId) {
-  await tablesDB.deleteRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.REFERENCES,
-    rowId: referenceId,
+  return runWithTransaction("deleteReference", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+    });
+
+    const result = await tablesDB.deleteRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "delete",
+      tableId: TABLES.REFERENCES,
+      rowId: referenceId,
+      before: stripSystemFields(beforeRow),
+      after: null,
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "delete", table: TABLES.REFERENCES, rowId: referenceId },
+    ]);
   });
 }
 
@@ -552,31 +849,94 @@ export async function updateQualifier(qualifierId, data) {
   }
   if (data.value_relation !== undefined) updateData.value_relation = data.value_relation;
 
-  const result = await tablesDB.updateRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.QUALIFIERS,
-    rowId: qualifierId,
-    data: updateData,
-  });
+  return runWithTransaction("updateQualifier", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+    });
 
-  return result;
+    const result = await tablesDB.updateRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+      data: updateData,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "update",
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "update", table: TABLES.QUALIFIERS, rowId: qualifierId },
+    ]);
+  });
 }
 
 /**
  * Actualiza permisos de un qualifier
  */
 export async function updateQualifierPermissions(qualifierId, permissions) {
-  return updateRowPermissions(TABLES.QUALIFIERS, qualifierId, permissions);
+  return runWithTransaction("updateQualifierPermissions", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+    });
+
+    const result = await updateRowPermissions(TABLES.QUALIFIERS, qualifierId, permissions, transactionId);
+
+    await createAuditEntry({
+      action: "updatePermissions",
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "updatePermissions", table: TABLES.QUALIFIERS, rowId: qualifierId },
+    ]);
+  });
 }
 
 /**
  * Elimina un qualifier
  */
 export async function deleteQualifier(qualifierId) {
-  await tablesDB.deleteRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.QUALIFIERS,
-    rowId: qualifierId,
+  return runWithTransaction("deleteQualifier", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+    });
+
+    const result = await tablesDB.deleteRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "delete",
+      tableId: TABLES.QUALIFIERS,
+      rowId: qualifierId,
+      before: stripSystemFields(beforeRow),
+      after: null,
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "delete", table: TABLES.QUALIFIERS, rowId: qualifierId },
+    ]);
   });
 }
 
@@ -596,44 +956,118 @@ export async function updateClaim(claimId, data) {
   }
   if (data.value_relation !== undefined) updateData.value_relation = data.value_relation;
 
-  const result = await tablesDB.updateRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.CLAIMS,
-    rowId: claimId,
-    data: updateData,
-  });
+  return runWithTransaction("updateClaim", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+    });
 
-  return result;
+    const result = await tablesDB.updateRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+      data: updateData,
+      transactionId,
+    });
+
+    await createAuditEntry({
+      action: "update",
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "update", table: TABLES.CLAIMS, rowId: claimId },
+    ]);
+  });
 }
 
 /**
  * Actualiza permisos de un claim
  */
 export async function updateClaimPermissions(claimId, permissions) {
-  return updateRowPermissions(TABLES.CLAIMS, claimId, permissions);
+  return runWithTransaction("updateClaimPermissions", async (transactionId) => {
+    const beforeRow = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+    });
+
+    const result = await updateRowPermissions(TABLES.CLAIMS, claimId, permissions, transactionId);
+
+    await createAuditEntry({
+      action: "updatePermissions",
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+      before: stripSystemFields(beforeRow),
+      after: stripSystemFields(result),
+      transactionId,
+    });
+
+    return wrapTransactionResult(result, [
+      { action: "updatePermissions", table: TABLES.CLAIMS, rowId: claimId },
+    ]);
+  });
 }
 
 /**
  * Elimina un claim y todos sus qualifiers y references asociados
  */
 export async function deleteClaim(claimId) {
-  // Primero eliminar qualifiers
-  const qualifiers = await getQualifiersByClaim(claimId);
-  for (const qualifier of qualifiers) {
-    await deleteQualifier(qualifier.$id);
-  }
+  return runWithTransaction("deleteClaim", async (transactionId) => {
+    const changes = [];
+    const beforeClaim = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+    });
+    // Primero eliminar qualifiers
+    const qualifiers = await getQualifiersByClaim(claimId);
+    for (const qualifier of qualifiers) {
+      await tablesDB.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId: TABLES.QUALIFIERS,
+        rowId: qualifier.$id,
+        transactionId,
+      });
+      changes.push({ action: "delete", table: TABLES.QUALIFIERS, rowId: qualifier.$id });
+    }
 
-  // Eliminar references
-  const references = await getReferencesByClaim(claimId);
-  for (const reference of references) {
-    await deleteReference(reference.$id);
-  }
+    // Eliminar references
+    const references = await getReferencesByClaim(claimId);
+    for (const reference of references) {
+      await tablesDB.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId: TABLES.REFERENCES,
+        rowId: reference.$id,
+        transactionId,
+      });
+      changes.push({ action: "delete", table: TABLES.REFERENCES, rowId: reference.$id });
+    }
 
-  // Finalmente eliminar el claim
-  await tablesDB.deleteRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.CLAIMS,
-    rowId: claimId,
+    // Finalmente eliminar el claim
+    const result = await tablesDB.deleteRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+      transactionId,
+    });
+    changes.push({ action: "delete", table: TABLES.CLAIMS, rowId: claimId });
+
+    await createAuditEntry({
+      action: "delete",
+      tableId: TABLES.CLAIMS,
+      rowId: claimId,
+      before: stripSystemFields(beforeClaim),
+      after: null,
+      transactionId,
+      changes,
+    });
+    return wrapTransactionResult(result, changes);
   });
 }
 
@@ -641,20 +1075,292 @@ export async function deleteClaim(claimId) {
  * Elimina una entidad y todos sus claims asociados
  */
 export async function deleteEntity(entityId) {
-  // Obtener todos los claims de esta entidad
-  const claims = await getClaimsBySubject(entityId);
-  
-  // Eliminar cada claim (esto también elimina qualifiers y references)
-  for (const claim of claims) {
-    await deleteClaim(claim.$id);
+  return runWithTransaction("deleteEntity", async (transactionId) => {
+    const changes = [];
+    const beforeEntity = await tablesDB.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+    });
+    // Obtener todos los claims de esta entidad
+    const claims = await getClaimsBySubject(entityId);
+
+    // Eliminar cada claim con sus relaciones dentro de la misma transacción
+    for (const claim of claims) {
+      const qualifiers = await getQualifiersByClaim(claim.$id);
+      for (const qualifier of qualifiers) {
+        await tablesDB.deleteRow({
+          databaseId: DATABASE_ID,
+          tableId: TABLES.QUALIFIERS,
+          rowId: qualifier.$id,
+          transactionId,
+        });
+        changes.push({ action: "delete", table: TABLES.QUALIFIERS, rowId: qualifier.$id });
+      }
+
+      const references = await getReferencesByClaim(claim.$id);
+      for (const reference of references) {
+        await tablesDB.deleteRow({
+          databaseId: DATABASE_ID,
+          tableId: TABLES.REFERENCES,
+          rowId: reference.$id,
+          transactionId,
+        });
+        changes.push({ action: "delete", table: TABLES.REFERENCES, rowId: reference.$id });
+      }
+
+      await tablesDB.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId: TABLES.CLAIMS,
+        rowId: claim.$id,
+        transactionId,
+      });
+      changes.push({ action: "delete", table: TABLES.CLAIMS, rowId: claim.$id });
+    }
+
+    // Finalmente eliminar la entidad
+    const result = await tablesDB.deleteRow({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+      transactionId,
+    });
+    changes.push({ action: "delete", table: TABLES.ENTITIES, rowId: entityId });
+
+    await createAuditEntry({
+      action: "delete",
+      tableId: TABLES.ENTITIES,
+      rowId: entityId,
+      before: stripSystemFields(beforeEntity),
+      after: null,
+      transactionId,
+      changes,
+    });
+    return wrapTransactionResult(result, changes);
+  });
+}
+
+// ============================================
+// BULK OPERATIONS
+// ============================================
+
+/**
+ * Crea múltiples rows en una tabla
+ * @param {string} tableId - ID de la tabla
+ * @param {Array} rows - Array de { data, rowId?, permissions? }
+ * @param {string} teamId - ID del team (opcional)
+ * @param {Object} options - { continueOnError?: boolean }
+ */
+export async function createRowsBulk(tableId, rows = [], teamId = null, options = {}) {
+  const { continueOnError = true } = options;
+  const basePermissions = generatePermissions(teamId);
+
+  return runWithTransaction("createRowsBulk", async (transactionId) => {
+    if (typeof tablesDB.createRows === "function") {
+      const data = (rows || []).map((row) => ({
+        ...(row?.data || {}),
+        $id: row?.rowId,
+        $permissions: row?.permissions || basePermissions,
+      }));
+      const result = await tablesDB.createRows({
+        databaseId: DATABASE_ID,
+        tableId,
+        rows: data,
+        transactionId,
+      });
+
+      await createAuditEntry({
+        action: "bulkCreate",
+        tableId,
+        rowId: null,
+        before: null,
+        after: null,
+        transactionId,
+        changes: [{ action: "bulkCreate", table: tableId, count: data.length }],
+      });
+
+      return wrapTransactionResult(result, [
+        { action: "bulkCreate", table: tableId, count: data.length },
+      ]);
+    }
+
+    const tasks = (rows || []).map((row) => async () => {
+      const rowId = row?.rowId || "unique()";
+      const permissions = row?.permissions || basePermissions;
+      return tablesDB.createRow({
+        databaseId: DATABASE_ID,
+        tableId,
+        rowId,
+        data: row?.data || {},
+        permissions,
+        transactionId,
+      });
+    });
+
+    return runBulkTasks(tasks, { continueOnError }).then(async (result) => {
+      await createAuditEntry({
+        action: "bulkCreate",
+        tableId,
+        rowId: null,
+        before: null,
+        after: null,
+        transactionId,
+        changes: [{ action: "bulkCreate", table: tableId, count: rows.length }],
+      });
+      return wrapTransactionResult(result, [
+        { action: "bulkCreate", table: tableId, count: rows.length },
+      ]);
+    });
+  });
+}
+
+/**
+ * Actualiza múltiples rows en una tabla
+ * @param {string} tableId - ID de la tabla
+ * @param {Array} updates - Array de { rowId, data }
+ * @param {Object} options - { continueOnError?: boolean }
+ */
+export async function updateRowsBulk(tableId, updates = [], options = {}) {
+  const { continueOnError = true } = options;
+
+  return runWithTransaction("updateRowsBulk", async (transactionId) => {
+    if (typeof tablesDB.updateRows === "function") {
+      const rows = (updates || []).map((item) => ({
+        $id: item?.rowId,
+        ...(item?.data || {}),
+      }));
+      return tablesDB.updateRows({
+        databaseId: DATABASE_ID,
+        tableId,
+        rows,
+        transactionId,
+      }).then(async (result) => {
+        await createAuditEntry({
+          action: "bulkUpdate",
+          tableId,
+          rowId: null,
+          before: null,
+          after: null,
+          transactionId,
+          changes: [{ action: "bulkUpdate", table: tableId, count: rows.length }],
+        });
+
+        return wrapTransactionResult(result, [
+          { action: "bulkUpdate", table: tableId, count: rows.length },
+        ]);
+      });
+    }
+
+    const tasks = (updates || []).map((item) => async () => {
+      if (!item?.rowId) throw new Error("rowId es requerido para actualizar");
+      return tablesDB.updateRow({
+        databaseId: DATABASE_ID,
+        tableId,
+        rowId: item.rowId,
+        data: item.data || {},
+        transactionId,
+      });
+    });
+
+    return runBulkTasks(tasks, { continueOnError }).then(async (result) => {
+      await createAuditEntry({
+        action: "bulkUpdate",
+        tableId,
+        rowId: null,
+        before: null,
+        after: null,
+        transactionId,
+        changes: [{ action: "bulkUpdate", table: tableId, count: updates.length }],
+      });
+      return wrapTransactionResult(result, [
+        { action: "bulkUpdate", table: tableId, count: updates.length },
+      ]);
+    });
+  });
+}
+
+/**
+ * Elimina múltiples rows en una tabla
+ * @param {string} tableId - ID de la tabla
+ * @param {Array} rowIds - Array de rowId
+ * @param {Object} options - { continueOnError?: boolean }
+ */
+export async function deleteRowsBulk(tableId, rowIds = [], options = {}) {
+  const { continueOnError = true } = options;
+
+  return runWithTransaction("deleteRowsBulk", async (transactionId) => {
+    if (typeof tablesDB.deleteRows === "function") {
+      return tablesDB.deleteRows({
+        databaseId: DATABASE_ID,
+        tableId,
+        rowIds: (rowIds || []).filter(Boolean),
+        transactionId,
+      }).then(async (result) => {
+        await createAuditEntry({
+          action: "bulkDelete",
+          tableId,
+          rowId: null,
+          before: null,
+          after: null,
+          transactionId,
+          changes: [{ action: "bulkDelete", table: tableId, count: rowIds.length }],
+        });
+
+        return wrapTransactionResult(result, [
+          { action: "bulkDelete", table: tableId, count: rowIds.length },
+        ]);
+      });
+    }
+
+    const tasks = (rowIds || []).map((rowId) => async () => {
+      if (!rowId) throw new Error("rowId es requerido para eliminar");
+      return tablesDB.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId,
+        rowId,
+        transactionId,
+      });
+    });
+
+    return runBulkTasks(tasks, { continueOnError }).then(async (result) => {
+      await createAuditEntry({
+        action: "bulkDelete",
+        tableId,
+        rowId: null,
+        before: null,
+        after: null,
+        transactionId,
+        changes: [{ action: "bulkDelete", table: tableId, count: rowIds.length }],
+      });
+      return wrapTransactionResult(result, [
+        { action: "bulkDelete", table: tableId, count: rowIds.length },
+      ]);
+    });
+  });
+}
+
+async function runBulkTasks(tasks, { continueOnError }) {
+  const results = [];
+  const errors = [];
+
+  if (!continueOnError) {
+    for (const task of tasks) {
+      const result = await task();
+      results.push(result);
+    }
+    return { results, errors };
   }
 
-  // Finalmente eliminar la entidad
-  await tablesDB.deleteRow({
-    databaseId: DATABASE_ID,
-    tableId: TABLES.ENTITIES,
-    rowId: entityId,
+  const settled = await Promise.allSettled(tasks.map((task) => task()));
+  settled.forEach((item) => {
+    if (item.status === "fulfilled") {
+      results.push(item.value);
+    } else {
+      errors.push(item.reason);
+    }
   });
+
+  return { results, errors };
 }
 
 // ============================================
@@ -740,6 +1446,175 @@ export async function executeInTransaction(operations) {
     await rollbackTransaction(tx.$id);
     throw e;
   }
+}
+
+/**
+ * Lista transacciones
+ */
+export async function listTransactions(filters = {}) {
+  if (typeof tablesDB.listTransactions !== "function") return [];
+  const {
+    status,
+    from,
+    to,
+    limit,
+    offset,
+    queries: extraQueries = [],
+  } = filters || {};
+  const queries = [...(extraQueries || [])];
+
+  if (status && status !== "all") {
+    queries.push(Query.equal("status", status));
+  }
+
+  const gt = Query.greaterThanEqual || Query.greaterThan;
+  const lt = Query.lessThanEqual || Query.lessThan;
+
+  if (from && gt) {
+    queries.push(gt("$createdAt", from));
+  }
+  if (to && lt) {
+    queries.push(lt("$createdAt", to));
+  }
+  if (limit) queries.push(Query.limit(limit));
+  if (offset) queries.push(Query.offset(offset));
+
+  const result = await tablesDB.listTransactions({ queries });
+  return result?.transactions || result?.items || [];
+}
+
+/**
+ * Lista auditoría de cambios
+ */
+export async function listAuditEntries(filters = {}) {
+  if (!isAuditEnabled()) return [];
+  const {
+    status,
+    from,
+    to,
+    limit,
+    offset,
+    tableId,
+    userId,
+    queries: extraQueries = [],
+  } = filters || {};
+  const queries = [...(extraQueries || [])];
+
+  if (status && status !== "all") {
+    queries.push(Query.equal("status", status));
+  }
+  if (tableId && tableId !== "all") {
+    queries.push(Query.equal("tableId", tableId));
+  }
+  if (userId) {
+    queries.push(Query.equal("userId", userId));
+  }
+
+  const gt = Query.greaterThanEqual || Query.greaterThan;
+  const lt = Query.lessThanEqual || Query.lessThan;
+
+  if (from && gt) queries.push(gt("$createdAt", from));
+  if (to && lt) queries.push(lt("$createdAt", to));
+  if (limit) queries.push(Query.limit(limit));
+  if (offset) queries.push(Query.offset(offset));
+
+  const result = await tablesDB.listRows({
+    databaseId: DATABASE_ID,
+    tableId: AUDIT_TABLE_ID,
+    queries,
+  });
+
+  return result?.rows || [];
+}
+
+/**
+ * Aprueba una auditoría (marca status)
+ */
+export async function approveAuditEntry(auditId, note) {
+  if (!isAuditEnabled()) return null;
+  return tablesDB.updateRow({
+    databaseId: DATABASE_ID,
+    tableId: AUDIT_TABLE_ID,
+    rowId: auditId,
+    data: {
+      status: "approved",
+      note: note || null,
+      reviewedAt: new Date().toISOString(),
+    },
+  });
+}
+
+/**
+ * Rechaza una auditoría (marca status)
+ */
+export async function rejectAuditEntry(auditId, note) {
+  if (!isAuditEnabled()) return null;
+  return tablesDB.updateRow({
+    databaseId: DATABASE_ID,
+    tableId: AUDIT_TABLE_ID,
+    rowId: auditId,
+    data: {
+      status: "rejected",
+      note: note || null,
+      reviewedAt: new Date().toISOString(),
+    },
+  });
+}
+
+/**
+ * Aplica rollback basado en auditoría
+ */
+export async function rollbackAuditEntry(auditEntry, note) {
+  if (!auditEntry) throw new Error("Auditoría inválida");
+
+  const { action, tableId, rowId, before, after } = auditEntry;
+
+  return runWithTransaction("rollbackAuditEntry", async (transactionId) => {
+    let result = null;
+
+    if (action === "create") {
+      result = await tablesDB.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId,
+        rowId,
+        transactionId,
+      });
+    } else if (action === "update" || action === "updatePermissions") {
+      if (!before) throw new Error("No hay estado previo para revertir");
+      result = await tablesDB.updateRow({
+        databaseId: DATABASE_ID,
+        tableId,
+        rowId,
+        data: before,
+        transactionId,
+      });
+    } else if (action === "delete") {
+      if (!before) throw new Error("No hay estado previo para restaurar");
+      result = await tablesDB.createRow({
+        databaseId: DATABASE_ID,
+        tableId,
+        rowId: rowId || "unique()",
+        data: before,
+        transactionId,
+      });
+    } else {
+      throw new Error("Rollback no soportado para esta acción");
+    }
+
+    await createAuditEntry({
+      action: "rollback",
+      tableId,
+      rowId,
+      before: after || null,
+      after: before || null,
+      status: "approved",
+      transactionId,
+      note: note || null,
+      relatedAuditId: auditEntry.$id,
+    });
+
+    return result;
+  });
 }
 
 // ============================================
