@@ -22,6 +22,9 @@ import {
   isMfaUpdateSupported,
   createUserApiKey,
   isApiKeySupported,
+  listUserApiKeys,
+  deleteUserApiKey,
+  isApiKeyListSupported,
 } from "@/lib/auth";
 
 const OAUTH_PROVIDERS = [
@@ -51,6 +54,7 @@ export default function AccountPage() {
   const [identities, setIdentities] = useState([]);
   const [mfaInfo, setMfaInfo] = useState(null);
   const [apiKey, setApiKey] = useState(null);
+  const [apiKeys, setApiKeys] = useState([]);
 
   const [saving, setSaving] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -58,7 +62,9 @@ export default function AccountPage() {
   const [loadingMfa, setLoadingMfa] = useState(false);
   const [mfaUpdateAvailable, setMfaUpdateAvailable] = useState(false);
   const [apiKeyAvailable, setApiKeyAvailable] = useState(false);
+  const [apiKeyListAvailable, setApiKeyListAvailable] = useState(false);
   const [loadingApiKey, setLoadingApiKey] = useState(false);
+  const [loadingApiKeys, setLoadingApiKeys] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
@@ -87,9 +93,11 @@ export default function AccountPage() {
     if (!isAuthenticated) return;
     setMfaUpdateAvailable(isMfaUpdateSupported());
     setApiKeyAvailable(isApiKeySupported());
+    setApiKeyListAvailable(isApiKeyListSupported());
     loadSessions();
     loadIdentities();
     loadMfa();
+    loadApiKeys();
   }, [isAuthenticated]);
 
   function applyThemePreference(value) {
@@ -280,10 +288,37 @@ export default function AccountPage() {
       const token = await createUserApiKey();
       setApiKey(token);
       setSuccess("API Key generada correctamente. Guárdala en un lugar seguro.");
+      await loadApiKeys();
     } catch (err) {
       setError(err.message || "No se pudo generar la API Key");
     } finally {
       setLoadingApiKey(false);
+    }
+  }
+
+  async function loadApiKeys() {
+    if (!isApiKeyListSupported()) return;
+    setLoadingApiKeys(true);
+    try {
+      const list = await listUserApiKeys();
+      setApiKeys(list || []);
+    } catch (err) {
+      setError(err.message || "No se pudieron cargar las API Keys");
+    } finally {
+      setLoadingApiKeys(false);
+    }
+  }
+
+  async function handleRevokeApiKey(tokenId) {
+    const confirmRevoke = window.confirm("¿Anular esta API Key?");
+    if (!confirmRevoke) return;
+    setError(null);
+    try {
+      await deleteUserApiKey(tokenId);
+      await loadApiKeys();
+      setSuccess("API Key anulada");
+    } catch (err) {
+      setError(err.message || "No se pudo anular la API Key");
     }
   }
 
@@ -586,6 +621,39 @@ export default function AccountPage() {
                           <span>{apiKey}</span>
                         </div>
                       )}
+                      <div className="api-key-list">
+                        <h3>Keys generadas</h3>
+                        {!apiKeyListAvailable && (
+                          <p className="muted">El listado/revocación no está disponible en este SDK.</p>
+                        )}
+                        {apiKeyListAvailable && loadingApiKeys && (
+                          <p className="muted">Cargando keys...</p>
+                        )}
+                        {apiKeyListAvailable && !loadingApiKeys && apiKeys.length === 0 && (
+                          <p className="muted">No hay keys generadas.</p>
+                        )}
+                        {apiKeyListAvailable && !loadingApiKeys && apiKeys.length > 0 && (
+                          <div className="api-key-items">
+                            {apiKeys.map((key) => (
+                              <div key={key.$id || key.id} className="api-key-item">
+                                <div className="api-key-meta">
+                                  <strong>{key.name || "API Key"}</strong>
+                                  <span className="muted">
+                                    {key.createdAt || key.$createdAt || ""}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  onClick={() => handleRevokeApiKey(key.$id || key.id)}
+                                >
+                                  Anular
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>

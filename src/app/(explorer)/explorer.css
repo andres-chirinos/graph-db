@@ -1732,6 +1732,38 @@
   word-break: break-all;
 }
 
+.api-key-list {
+  margin-top: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.api-key-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.api-key-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.api-key-item:last-child {
+  border-bottom: none;
+}
+
+.api-key-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
 /* ============================================
    USER MENU
    ============================================ */
