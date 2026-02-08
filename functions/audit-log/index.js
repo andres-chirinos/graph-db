@@ -141,10 +141,28 @@ module.exports = async ({ req, res, log, error }) => {
 
     const previousData = body?.previousData || null;
 
+    const endpoint =
+      process.env.APPWRITE_ENDPOINT ||
+      process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
+    const projectId =
+      process.env.APPWRITE_PROJECT_ID ||
+      process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID;
+    const apiKey =
+      process.env.APPWRITE_API_KEY ||
+      process.env.APPWRITE_FUNCTION_API_KEY;
+
+    if (!endpoint || !projectId || !apiKey) {
+      return res.json({
+        ok: false,
+        skipped: true,
+        reason: "missing Appwrite endpoint, project, or api key",
+      });
+    }
+
     const client = new sdk.Client()
-      .setEndpoint(process.env.APPWRITE_ENDPOINT)
-      .setProject(process.env.APPWRITE_PROJECT_ID)
-      .setApiKey(process.env.APPWRITE_API_KEY);
+      .setEndpoint(endpoint)
+      .setProject(projectId)
+      .setKey(apiKey);
 
     //const userJwt = req?.headers?.["x-appwrite-user-jwt"];
     //if (userJwt) {
