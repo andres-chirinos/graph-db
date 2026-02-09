@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { Navigation } from "@/components";
+import "./style.css";
 
 // Database ID para los ejemplos
 const DB_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID;

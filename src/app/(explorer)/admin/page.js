@@ -11,6 +11,7 @@ import {
   rejectAuditEntry,
   rollbackAuditEntry,
 } from "@/lib/database";
+import "./style.css";
 
 export default function AdminPage() {
   const router = useRouter();

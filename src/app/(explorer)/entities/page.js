@@ -6,6 +6,7 @@ import { Navigation, EntityCard, LoadingState, ErrorState, EmptyState } from "@/
 import { listEntities, createEntity } from "@/lib/database";
 import { useAuth } from "@/context/AuthContext";
 import EntityForm from "@/components/EntityForm";
+import "./style.css";
 
 const ITEMS_PER_PAGE = 25;
 
