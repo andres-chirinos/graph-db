@@ -60,6 +60,115 @@ export default function SearchPage() {
           display: flex;
           justify-content: flex-end;
         }
+
+        .advanced-conditions {
+          margin-top: 1.5rem;
+        }
+
+        .conditions-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+
+        .conditions-header h3 {
+          margin: 0;
+          font-size: 1rem;
+        }
+
+        .conditions-empty {
+          margin-top: 0.75rem;
+          padding: 0.75rem 1rem;
+          border: 1px dashed var(--color-border-light, #c8ccd1);
+          border-radius: var(--radius-md, 4px);
+          color: var(--color-text-muted, #72777d);
+          background: var(--color-bg, #f8f9fa);
+          font-size: 0.875rem;
+        }
+
+        .conditions-list {
+          margin-top: 0.75rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+
+        .condition-row {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 0.75rem 0.875rem;
+          background: var(--color-bg-card, #ffffff);
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: 10px;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .condition-pill {
+          padding: 0.25rem 0.5rem;
+          border-radius: 999px;
+          background: var(--color-bg-alt, #eaecf0);
+          color: var(--color-text-secondary, #54595d);
+          font-size: 0.625rem;
+          font-weight: 700;
+          letter-spacing: 0.06em;
+        }
+
+        .condition-field {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .condition-field label {
+          font-size: 0.7rem;
+          font-weight: 700;
+          color: var(--color-text-secondary, #54595d);
+          text-transform: uppercase;
+        }
+
+        .condition-field input {
+          width: 100%;
+          padding: 0.55rem 0.75rem;
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: 8px;
+          font-size: 0.875rem;
+        }
+
+        .condition-field select {
+          width: 100%;
+          padding: 0.55rem 0.75rem;
+          border: 1px solid var(--color-border-light, #c8ccd1);
+          border-radius: 8px;
+          font-size: 0.875rem;
+          background: var(--color-bg-card, #ffffff);
+        }
+
+        .condition-field input:focus,
+        .condition-field select:focus {
+          outline: none;
+          border-color: var(--color-primary, #0645ad);
+          box-shadow: 0 0 0 2px rgba(6, 69, 173, 0.15);
+        }
+
+        .btn-remove-condition {
+          padding: 0.45rem;
+          background: var(--color-bg-alt, #eaecf0);
+          border: 1px solid transparent;
+          border-radius: 8px;
+          cursor: pointer;
+          color: var(--color-text-muted, #72777d);
+          font-size: 1rem;
+          line-height: 1;
+          transition: all 0.2s;
+        }
+
+        .btn-remove-condition:hover {
+          background: rgba(211, 51, 51, 0.1);
+          color: var(--color-error, #d33);
+        }
       `}</style>
     </div>
   );
@@ -74,8 +183,7 @@ function SearchContent() {
   const [searchSummary, setSearchSummary] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedText, setAdvancedText] = useState("");
-  const [advancedPropertyId, setAdvancedPropertyId] = useState(null);
-  const [advancedPropertyValue, setAdvancedPropertyValue] = useState("");
+  const [advancedConditions, setAdvancedConditions] = useState([]);
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -109,19 +217,42 @@ function SearchContent() {
     }
   }
 
+  function addAdvancedCondition() {
+    setAdvancedConditions((prev) => [
+      ...prev,
+      { id: Date.now() + Math.random(), propertyId: null, value: "", matchMode: "contains" },
+    ]);
+  }
+
+  function updateAdvancedCondition(id, updates) {
+    setAdvancedConditions((prev) =>
+      prev.map((condition) =>
+        condition.id === id ? { ...condition, ...updates } : condition
+      )
+    );
+  }
+
+  function removeAdvancedCondition(id) {
+    setAdvancedConditions((prev) => prev.filter((condition) => condition.id !== id));
+  }
+
   async function handleAdvancedSearch() {
     setLoading(true);
     setError(null);
     setHasSearched(true);
 
-    const properties = advancedPropertyId && advancedPropertyValue
-      ? [{ propertyId: advancedPropertyId, value: advancedPropertyValue }]
-      : [];
+    const properties = advancedConditions
+      .filter((condition) => condition.propertyId && condition.value?.trim())
+      .map((condition) => ({
+        propertyId: condition.propertyId,
+        value: condition.value,
+        matchMode: condition.matchMode || "contains",
+      }));
 
     const summaryParts = [];
     if (advancedText?.trim()) summaryParts.push(`texto: "${advancedText.trim()}"`);
-    if (advancedPropertyId && advancedPropertyValue) {
-      summaryParts.push(`propiedad: "${advancedPropertyValue.trim()}"`);
+    if (properties.length > 0) {
+      summaryParts.push(`${properties.length} condición${properties.length !== 1 ? "es" : ""}`);
     }
     setSearchSummary(summaryParts.length > 0 ? summaryParts.join(" · ") : "Búsqueda avanzada");
 
@@ -181,24 +312,69 @@ function SearchContent() {
                 placeholder="Ej: Municipalidad"
               />
             </div>
-            <div className="form-group">
-              <label>Propiedad</label>
-              <EntitySelector
-                value={advancedPropertyId}
-                onChange={setAdvancedPropertyId}
-                placeholder="Buscar propiedad..."
-              />
+          </div>
+
+          <div className="advanced-conditions">
+            <div className="conditions-header">
+              <h3>Condiciones (AND)</h3>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={addAdvancedCondition}
+              >
+                + Añadir condición
+              </button>
             </div>
-            <div className="form-group">
-              <label>Valor de la propiedad</label>
-              <input
-                type="text"
-                value={advancedPropertyValue}
-                onChange={(e) => setAdvancedPropertyValue(e.target.value)}
-                placeholder="Ej: 2026"
-                disabled={!advancedPropertyId}
-              />
-            </div>
+
+            {advancedConditions.length === 0 ? (
+              <div className="conditions-empty">
+                Agrega condiciones para filtrar por propiedades.
+              </div>
+            ) : (
+              <div className="conditions-list">
+                {advancedConditions.map((condition, index) => (
+                  <div key={condition.id} className="condition-row">
+                    {index > 0 && <span className="condition-pill">AND</span>}
+                    <div className="condition-field">
+                      <label>Propiedad</label>
+                      <EntitySelector
+                        value={condition.propertyId}
+                        onChange={(value) => updateAdvancedCondition(condition.id, { propertyId: value })}
+                        placeholder="Buscar propiedad..."
+                      />
+                    </div>
+                    <div className="condition-field">
+                      <label>Valor</label>
+                      <input
+                        type="text"
+                        value={condition.value}
+                        onChange={(e) => updateAdvancedCondition(condition.id, { value: e.target.value })}
+                        placeholder="Ej: 2026"
+                        disabled={!condition.propertyId}
+                      />
+                    </div>
+                    <div className="condition-field">
+                      <label>Operador</label>
+                      <select
+                        value={condition.matchMode || "contains"}
+                        onChange={(e) => updateAdvancedCondition(condition.id, { matchMode: e.target.value })}
+                      >
+                        <option value="contains">Contiene</option>
+                        <option value="equal">Igual</option>
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-remove-condition"
+                      onClick={() => removeAdvancedCondition(condition.id)}
+                      title="Eliminar condición"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="advanced-actions">
             <button

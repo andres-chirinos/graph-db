@@ -271,48 +271,84 @@ export async function searchEntities(searchTerm, limit = 20, offset = 0) {
  * @param {number} limit - Límite de resultados
  * @returns {Promise<Array>} - Lista de entidades que coinciden
  */
-export async function searchEntitiesByPropertyValue(propertyId, value, limit = 10) {
+export async function searchEntitiesByPropertyValue(propertyId, value, limit = 10, matchMode = "contains") {
   if (!propertyId || !value) return [];
-  
-  try {
-    // Buscar claims que tengan esa propiedad
-    const claimsResult = await tablesDB.listRows({
-      databaseId: DATABASE_ID,
-      tableId: TABLES.CLAIMS,
-      queries: [
-        Query.equal("property", propertyId),
-        Query.limit(100), // Obtener suficientes para filtrar
-      ],
-    });
 
-    if (!claimsResult.rows || claimsResult.rows.length === 0) {
-      return [];
+  const normalizeText = (text) =>
+    String(text ?? "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, " ");
+
+  const stringifyClaimValue = (rawValue) => {
+    if (rawValue === null || rawValue === undefined) return "";
+    if (typeof rawValue === "string") {
+      try {
+        const parsed = JSON.parse(rawValue);
+        if (typeof parsed === "string" || typeof parsed === "number" || typeof parsed === "boolean") {
+          return String(parsed);
+        }
+        if (parsed && typeof parsed === "object" && parsed.url) {
+          return String(parsed.url);
+        }
+      } catch {
+        return rawValue;
+      }
+      return rawValue;
+    }
+    if (typeof rawValue === "object" && rawValue.url) return String(rawValue.url);
+    try {
+      return JSON.stringify(rawValue);
+    } catch {
+      return String(rawValue);
+    }
+  };
+
+  const searchValue = normalizeText(value);
+  const mode = matchMode === "equal" ? "equal" : "contains";
+
+  try {
+    const entityIds = new Set();
+    const pageSize = 100;
+    let offset = 0;
+
+    while (entityIds.size < limit) {
+      const claimsResult = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: TABLES.CLAIMS,
+        queries: [
+          Query.equal("property", propertyId),
+          Query.limit(pageSize),
+          Query.offset(offset),
+        ],
+      });
+
+      const rows = claimsResult.rows || [];
+      if (rows.length === 0) break;
+
+      for (const claim of rows) {
+        const claimValue = normalizeText(stringifyClaimValue(claim.value_raw));
+        if (!claimValue || !searchValue) continue;
+        const matches = mode === "equal"
+          ? claimValue === searchValue
+          : claimValue === searchValue ||
+            claimValue.includes(searchValue) ||
+            searchValue.includes(claimValue);
+        if (matches) {
+          const id = claim.subject?.$id || claim.subject;
+          if (id) entityIds.add(id);
+        }
+        if (entityIds.size >= limit) break;
+      }
+
+      if (rows.length < pageSize) break;
+      offset += pageSize;
     }
 
-    // Filtrar en el cliente por valor (normalizado)
-    const searchValue = String(value).toLowerCase().trim();
-    const matchingClaims = claimsResult.rows.filter(claim => {
-      if (claim.value_raw === null || claim.value_raw === undefined) return false;
-      try {
-        const rawValue = claim.value_raw;
-        const claimValue = typeof rawValue === "string"
-          ? rawValue
-          : JSON.stringify(rawValue);
-        const normalized = String(claimValue).toLowerCase().trim();
-        return normalized.includes(searchValue) || searchValue.includes(normalized);
-      } catch {
-        return false;
-      }
-    });
+    if (entityIds.size === 0) return [];
 
-    // Extraer IDs únicos de las entidades
-    const entityIds = [...new Set(matchingClaims.map(c => c.subject?.$id || c.subject).filter(Boolean))];
-    
-    if (entityIds.length === 0) return [];
-
-    // Obtener las entidades una por una
     const entities = [];
-    for (const id of entityIds.slice(0, limit)) {
+    for (const id of Array.from(entityIds).slice(0, limit)) {
       try {
         const entity = await tablesDB.getRow({
           databaseId: DATABASE_ID,
@@ -321,7 +357,6 @@ export async function searchEntitiesByPropertyValue(propertyId, value, limit = 1
         });
         if (entity) entities.push(entity);
       } catch (e) {
-        // Entidad no encontrada, ignorar
         console.warn(`Entidad ${id} no encontrada`);
       }
     }
@@ -343,35 +378,80 @@ export async function searchEntitiesByPropertyValue(propertyId, value, limit = 1
  */
 export async function searchEntitiesAdvanced(conditions, limit = 10) {
   const { text, properties = [] } = conditions;
-  
-  let candidates = null;
-  
-  // Si hay texto, buscar primero por label/alias
-  if (text && text.trim()) {
-    const textResult = await searchEntities(text, limit * 2);
-    candidates = textResult.rows || [];
+
+  const normalizeText = (value) =>
+    String(value ?? "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, " ");
+
+  const term = normalizeText(text);
+  const conditionIds = [];
+
+  // Condición de texto (label/alias)
+  if (term) {
+    const pageSize = 50;
+    let offset = 0;
+    let collected = [];
+
+    while (collected.length < limit * 5) {
+      const result = await searchEntities(term, pageSize, offset);
+      const rows = result?.rows || [];
+      if (rows.length === 0) break;
+
+      const filtered = rows.filter((entity) => {
+        const label = normalizeText(entity.label);
+        const aliases = Array.isArray(entity.aliases)
+          ? entity.aliases.map((a) => normalizeText(a))
+          : [];
+        return label.includes(term) || aliases.some((a) => a.includes(term));
+      });
+
+      collected = collected.concat(filtered);
+      if (rows.length < pageSize) break;
+      offset += pageSize;
+    }
+
+    conditionIds.push(new Set(collected.map((e) => e.$id)));
   }
-  
-  // Para cada propiedad, buscar y hacer intersección
+
+  // Condiciones por propiedad (AND)
   for (const prop of properties) {
     if (!prop.propertyId || !prop.value) continue;
-    
-    const propMatches = await searchEntitiesByPropertyValue(prop.propertyId, prop.value, limit * 3);
-    
-    if (candidates === null) {
-      // Primera condición
-      candidates = propMatches;
-    } else {
-      // Intersección: solo mantener los que aparecen en ambos
-      const propIds = new Set(propMatches.map(e => e.$id));
-      candidates = candidates.filter(e => propIds.has(e.$id));
-    }
-    
-    // Si no hay candidatos, no tiene sentido seguir
-    if (candidates.length === 0) break;
+    const propMatches = await searchEntitiesByPropertyValue(
+      prop.propertyId,
+      prop.value,
+      limit * 10,
+      prop.matchMode
+    );
+    conditionIds.push(new Set(propMatches.map((e) => e.$id)));
   }
-  
-  return (candidates || []).slice(0, limit);
+
+  if (conditionIds.length === 0) return [];
+
+  // Intersección AND de todas las condiciones
+  let intersection = conditionIds[0];
+  for (const nextSet of conditionIds.slice(1)) {
+    intersection = new Set([...intersection].filter((id) => nextSet.has(id)));
+    if (intersection.size === 0) break;
+  }
+
+  const ids = Array.from(intersection).slice(0, limit);
+  const entities = [];
+  for (const id of ids) {
+    try {
+      const entity = await tablesDB.getRow({
+        databaseId: DATABASE_ID,
+        tableId: TABLES.ENTITIES,
+        rowId: id,
+      });
+      if (entity) entities.push(entity);
+    } catch (e) {
+      console.warn(`Entidad ${id} no encontrada`);
+    }
+  }
+
+  return entities;
 }
 
 /**

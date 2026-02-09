@@ -430,6 +430,7 @@ export default function ImportPage() {
         propertyId: null,
         propertyLabel: "",
         column: "",
+        matchMode: "contains",
       },
     ]);
   }
@@ -513,10 +514,13 @@ export default function ImportPage() {
             // Construir condiciones de búsqueda
             const searchConditions = {
               text: label,
-              properties: activeConditions.map(cond => ({
-                propertyId: cond.propertyId,
-                value: String(sampleRow[cond.column] || "").trim(),
-              })).filter(p => p.value),
+              properties: activeConditions
+                .map((cond) => ({
+                  propertyId: cond.propertyId,
+                  value: String(sampleRow[cond.column] || "").trim(),
+                  matchMode: cond.matchMode || "contains",
+                }))
+                .filter((p) => p.value),
             };
             
             // Buscar con condiciones avanzadas
@@ -1519,10 +1523,11 @@ export default function ImportPage() {
                 </p>
 
                 <div className="reconcile-conditions-list">
-                  {reconcileConditions.map((condition) => (
+                  {reconcileConditions.map((condition, index) => (
                     <ReconcileConditionRow
                       key={condition.id}
                       condition={condition}
+                      index={index}
                       headers={headers.filter(h => h !== labelColumn)}
                       onUpdate={(updates) => updateReconcileCondition(condition.id, updates)}
                       onRemove={() => removeReconcileCondition(condition.id)}
@@ -4323,7 +4328,7 @@ function ReferenceMappingRow({ reference, onUpdate, onRemove, onSearchProperties
 }
 
 // Componente para condición de reconciliación
-function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearchProperties }) {
+function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearchProperties, index = 0 }) {
   const [entities, setEntities] = useState([]);
   const [entitySearch, setEntitySearch] = useState("");
   const [showEntityDropdown, setShowEntityDropdown] = useState(false);
@@ -4375,6 +4380,11 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
 
   return (
     <div className="reconcile-condition-row">
+      {index > 0 && (
+        <div className="condition-operator">
+          <span className="filter-pill">AND</span>
+        </div>
+      )}
       <div className="condition-property">
         <label>Propiedad</label>
         <div className="property-selector">
@@ -4419,6 +4429,17 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
         </div>
       </div>
 
+      <div className="condition-operator-select">
+        <label>Operador</label>
+        <select
+          value={condition.matchMode || "contains"}
+          onChange={(e) => onUpdate({ matchMode: e.target.value })}
+        >
+          <option value="contains">Contiene</option>
+          <option value="equal">Igual</option>
+        </select>
+      </div>
+
       <div className="condition-column">
         <label>Columna del archivo</label>
         <select
@@ -4444,27 +4465,46 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
       <style jsx>{`
         .reconcile-condition-row {
           display: flex;
-          align-items: flex-end;
+          align-items: center;
           gap: 1rem;
-          padding: 1rem;
-          background: var(--color-bg, #f8f9fa);
+          padding: 0.75rem 0.875rem;
+          background: var(--color-bg-card, #ffffff);
           border: 1px solid var(--color-border-light, #c8ccd1);
-          border-radius: var(--radius-md, 4px);
+          border-radius: 10px;
           margin-bottom: 0.5rem;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .condition-operator {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .filter-pill {
+          padding: 0.25rem 0.5rem;
+          border-radius: 999px;
+          background: var(--color-bg-alt, #eaecf0);
+          color: var(--color-text-secondary, #54595d);
+          font-size: 0.625rem;
+          font-weight: 700;
+          letter-spacing: 0.06em;
         }
 
         .condition-property,
-        .condition-column {
+        .condition-column,
+        .condition-operator-select {
           flex: 1;
           display: flex;
           flex-direction: column;
-          gap: 0.375rem;
+          gap: 0.25rem;
         }
 
         .condition-property label,
-        .condition-column label {
-          font-size: 0.75rem;
-          font-weight: 600;
+        .condition-column label,
+        .condition-operator-select label {
+          font-size: 0.7rem;
+          font-weight: 700;
           color: var(--color-text-secondary, #54595d);
           text-transform: uppercase;
         }
@@ -4477,12 +4517,12 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.5rem 0.75rem;
-          background: var(--color-bg-card, #ffffff);
-          border: 1px solid var(--color-primary, #0645ad);
-          border-radius: var(--radius-sm, 2px);
-          color: var(--color-primary, #0645ad);
-          font-weight: 500;
+          padding: 0.55rem 0.75rem;
+          background: var(--color-bg-alt, #eaecf0);
+          border: 1px solid transparent;
+          border-radius: 8px;
+          color: var(--color-text, #202122);
+          font-weight: 600;
         }
 
         .property-search-container {
@@ -4491,10 +4531,17 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
 
         .property-search-container input {
           width: 100%;
-          padding: 0.5rem 0.75rem;
+          padding: 0.55rem 0.75rem;
           border: 1px solid var(--color-border-light, #c8ccd1);
-          border-radius: var(--radius-sm, 2px);
+          border-radius: 8px;
           font-size: 0.875rem;
+          background: var(--color-bg-card, #ffffff);
+        }
+
+        .property-search-container input:focus {
+          outline: none;
+          border-color: var(--color-primary, #0645ad);
+          box-shadow: 0 0 0 2px rgba(6, 69, 173, 0.15);
         }
 
         .entity-dropdown {
@@ -4502,12 +4549,12 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
           top: 100%;
           left: 0;
           right: 0;
-          max-height: 200px;
+          max-height: 220px;
           overflow-y: auto;
           background: var(--color-bg-card, #ffffff);
           border: 1px solid var(--color-border-light, #c8ccd1);
-          border-radius: var(--radius-sm, 2px);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          border-radius: 8px;
+          box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
           z-index: 100;
         }
 
@@ -4517,7 +4564,7 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
         }
 
         .entity-option {
-          padding: 0.5rem 0.75rem;
+          padding: 0.55rem 0.75rem;
           text-align: left;
           border: none;
           background: none;
@@ -4537,12 +4584,20 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
           font-size: 0.75rem;
         }
 
-        .condition-column select {
-          padding: 0.5rem 0.75rem;
+        .condition-column select,
+        .condition-operator-select select {
+          padding: 0.55rem 0.75rem;
           border: 1px solid var(--color-border-light, #c8ccd1);
-          border-radius: var(--radius-sm, 2px);
+          border-radius: 8px;
           font-size: 0.875rem;
           background: var(--color-bg-card, #ffffff);
+        }
+
+        .condition-column select:focus,
+        .condition-operator-select select:focus {
+          outline: none;
+          border-color: var(--color-primary, #0645ad);
+          box-shadow: 0 0 0 2px rgba(6, 69, 173, 0.15);
         }
 
         .clear-btn {
@@ -4558,10 +4613,10 @@ function ReconcileConditionRow({ condition, headers, onUpdate, onRemove, onSearc
         }
 
         .btn-remove-condition {
-          padding: 0.5rem;
-          background: none;
-          border: 1px solid var(--color-border-light, #c8ccd1);
-          border-radius: var(--radius-sm, 2px);
+          padding: 0.45rem;
+          background: var(--color-bg-alt, #eaecf0);
+          border: 1px solid transparent;
+          border-radius: 8px;
           cursor: pointer;
           color: var(--color-text-muted, #72777d);
           font-size: 1rem;
