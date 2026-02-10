@@ -91,6 +91,10 @@ export default function ImportPage() {
       title: "Claims y fórmulas",
       description: "Modela claims, qualifiers y references con expresiones.",
     },
+    {
+      title: "Finalizar",
+      description: "Revisa el estado final de la importación.",
+    },
   ];
 
   function getFileFormat(fileObject) {
@@ -514,7 +518,7 @@ export default function ImportPage() {
 
   function handleFinalizeImport() {
     setImportFinalized(true);
-    setStep(4);
+    setStep(5);
   }
 
   function canNavigateToStep(index) {
@@ -522,6 +526,7 @@ export default function ImportPage() {
     if (index <= 2) return true;
     if (index === 3) return !!importResult;
     if (index === 4) return importFinalized;
+    if (index === 5) return importFinalized;
     return false;
   }
 
@@ -571,14 +576,6 @@ export default function ImportPage() {
               </label>
               <button type="button" className="btn btn-secondary" onClick={handleDownloadConfig}>
                 Descargar JSON
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleRunImport}
-                disabled={importLoading}
-              >
-                {importLoading ? "Ejecutando..." : "Ejecutar importación"}
               </button>
             </div>
             {(importLoading || importError || importResult) && (
@@ -1083,14 +1080,6 @@ export default function ImportPage() {
                       Revisa cada caso y confirma la acción final.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={handleFinalizeImport}
-                    disabled={importFinalized || reconciliationItems.length === 0}
-                  >
-                    {importFinalized ? "Importación finalizada" : "Finalizar importación"}
-                  </button>
                 </div>
 
                 {reconciliationItems.length === 0 ? (
@@ -1318,6 +1307,21 @@ export default function ImportPage() {
             </section>
           )}
 
+          {step === 5 && (
+            <section className="step-section">
+              <div className="section-card">
+                <h2 className="section-title">6. Importación finalizada</h2>
+                <p className="section-subtitle">
+                  La importación quedó configurada y las decisiones fueron aplicadas.
+                </p>
+                <div className="summary-meta">
+                  Registros reconciliados: {reconciliationItems.length} ·
+                  Estado: {importFinalized ? "Finalizado" : "Pendiente"}
+                </div>
+              </div>
+            </section>
+          )}
+
           <section className="step-actions">
             <button
               type="button"
@@ -1330,10 +1334,27 @@ export default function ImportPage() {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setStep((prev) => Math.min(prev + 1, steps.length - 1))}
-              disabled={step === steps.length - 1 || (step === 3 && !importFinalized)}
+              onClick={() => {
+                if (step === 1 && !importResult && !importLoading) {
+                  handleRunImport();
+                  return;
+                }
+                if (step === 4 && !importFinalized) {
+                  handleFinalizeImport();
+                  return;
+                }
+                setStep((prev) => Math.min(prev + 1, steps.length - 1));
+              }}
+              disabled={
+                step === steps.length - 1 ||
+                (step === 1 && importLoading)
+              }
             >
-              Siguiente
+              {step === 4 && !importFinalized
+                ? "Finalizar"
+                : step === steps.length - 1
+                ? "Finalizado"
+                : "Siguiente"}
             </button>
           </section>
 
