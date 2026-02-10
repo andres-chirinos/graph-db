@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { uploadGeoJSON } from "@/lib/database";
+import { uploadGeoJSON, uploadFileByDatatype } from "@/lib/buckets";
 
 const DATATYPES = [
   { value: "string", label: "Texto" },
@@ -12,7 +12,7 @@ const DATATYPES = [
   { value: "coordinate", label: "Coordenadas" },
   { value: "polygon", label: "Polígono" },
   { value: "color", label: "Color" },
-  { value: "image", label: "Imagen (URL)" },
+  { value: "image", label: "Imagen" },
   { value: "json", label: "JSON" },
 ];
 
@@ -33,6 +33,9 @@ export default function ValueInput({
   const [polygonMode, setPolygonMode] = useState("upload");
   const [polygonUploading, setPolygonUploading] = useState(false);
   const [polygonError, setPolygonError] = useState(null);
+  const [imageMode, setImageMode] = useState("upload");
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState(null);
 
   // Calcular tamaño del texto
   const charCount = typeof data === "string" ? data.length : 0;
@@ -70,6 +73,13 @@ export default function ValueInput({
     setPolygonMode(nextMode);
   }, [datatype, data]);
 
+  useEffect(() => {
+    if (datatype !== "image") return;
+    if (data === "" || data === null || data === undefined) return;
+    const nextMode = getImageModeFromData(data);
+    setImageMode(nextMode);
+  }, [datatype, data]);
+
   function isUrl(value) {
     if (typeof value !== "string") return false;
     try {
@@ -91,7 +101,25 @@ export default function ValueInput({
     return "upload";
   }
 
+  function getImageModeFromData(value) {
+    if (value && typeof value === "object") {
+      if (value.url && !value.fileId) return "url";
+      return "upload";
+    }
+    if (typeof value === "string" && isUrl(value)) {
+      return "url";
+    }
+    return "upload";
+  }
+
   function getPolygonUrl(value) {
+    if (!value) return "";
+    if (typeof value === "string" && isUrl(value)) return value;
+    if (typeof value === "object" && value.url) return value.url;
+    return "";
+  }
+
+  function getImageUrl(value) {
     if (!value) return "";
     if (typeof value === "string" && isUrl(value)) return value;
     if (typeof value === "object" && value.url) return value.url;
@@ -114,6 +142,11 @@ export default function ValueInput({
         }
         return String(data);
       case "polygon":
+        if (typeof data === "object") {
+          return data;
+        }
+        return String(data);
+      case "image":
         if (typeof data === "object") {
           return data;
         }
@@ -221,6 +254,10 @@ export default function ValueInput({
         } catch {
           return inputValue;
         }
+      case "image":
+        if (typeof inputValue === "object") return inputValue;
+        if (typeof inputValue === "string" && isUrl(inputValue)) return inputValue;
+        return inputValue;
       case "json":
         try {
           return JSON.parse(inputValue);
@@ -235,7 +272,7 @@ export default function ValueInput({
   function normalizeDataForDatatype(nextDatatype, nextData) {
     if (nextData === null || nextData === undefined) return "";
     if (typeof nextData === "object") {
-      if (nextDatatype === "polygon" || nextDatatype === "json") return nextData;
+      if (nextDatatype === "polygon" || nextDatatype === "json" || nextDatatype === "image") return nextData;
       try {
         return JSON.stringify(nextData);
       } catch {
@@ -287,12 +324,121 @@ export default function ValueInput({
 
       case "url":
       case "image":
+        if (datatype === "url") {
+          return (
+            <input
+              type="url"
+              placeholder="https://ejemplo.com"
+              {...commonProps}
+            />
+          );
+        }
+
+        const imageUrl = getImageUrl(data);
+        const hasImageUpload = typeof data === "object" && data?.fileId && data?.bucketId;
+
         return (
-          <input
-            type="url"
-            placeholder="https://ejemplo.com"
-            {...commonProps}
-          />
+          <div className="polygon-input-wrapper">
+            <div className="polygon-mode">
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="imageMode"
+                  value="upload"
+                  checked={imageMode === "upload"}
+                  onChange={() => setImageMode("upload")}
+                  disabled={disabled}
+                />
+                Subir imagen
+              </label>
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="imageMode"
+                  value="url"
+                  checked={imageMode === "url"}
+                  onChange={() => setImageMode("url")}
+                  disabled={disabled}
+                />
+                Enlace
+              </label>
+            </div>
+
+            {imageMode === "upload" ? (
+              <div className="polygon-upload">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+
+                    setImageError(null);
+                    setImageUploading(true);
+                    try {
+                      const uploaded = await uploadFileByDatatype("image", file, file.name || "image");
+                      handleChange(datatype, {
+                        fileId: uploaded.fileId,
+                        bucketId: uploaded.bucketId,
+                        url: uploaded.url,
+                        name: uploaded.name,
+                        size: uploaded.size,
+                        mimeType: uploaded.mimeType,
+                      });
+                    } catch (err) {
+                      setImageError("No se pudo subir la imagen.");
+                    } finally {
+                      setImageUploading(false);
+                      e.target.value = "";
+                    }
+                  }}
+                  disabled={disabled || imageUploading}
+                />
+
+                {imageUploading && (
+                  <span className="polygon-upload-status">Subiendo...</span>
+                )}
+
+                {hasImageUpload && (
+                  <div className="polygon-file-info">
+                    <span>Imagen subida</span>
+                    {data?.url && (
+                      <a href={data.url} target="_blank" rel="noopener noreferrer">
+                        Ver imagen
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-tool"
+                      onClick={() => handleChange(datatype, "")}
+                      disabled={disabled}
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                )}
+
+                {imageError && <div className="form-error">{imageError}</div>}
+              </div>
+            ) : (
+              <div className="polygon-url-input">
+                <input
+                  type="url"
+                  className="form-input"
+                  placeholder="https://ejemplo.com/imagen.jpg"
+                  value={imageUrl}
+                  onChange={(e) => handleChange(datatype, e.target.value)}
+                  disabled={disabled}
+                  required={required}
+                />
+                {imageUrl && (
+                  <a href={imageUrl} target="_blank" rel="noopener noreferrer">
+                    Ver enlace
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
         );
 
       case "boolean":
