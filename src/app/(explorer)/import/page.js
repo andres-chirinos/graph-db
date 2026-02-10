@@ -63,12 +63,6 @@ export default function ImportPage() {
     autoCreateNoMatch: false,
     autoSkipLow: false,
   });
-  const [exampleClaimTemplate, setExampleClaimTemplate] = useState({
-    property: "P1",
-    valueExpr: "{{descripcion}}",
-    qualifiers: [{ property: "P2", valueExpr: "{{fecha}}" }],
-    references: [{ property: "P3", valueExpr: "{{fuente}}" }],
-  });
   const [importResult, setImportResult] = useState(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState("");
@@ -88,6 +82,10 @@ export default function ImportPage() {
     {
       title: "Reconciliación",
       description: "Valida coincidencias y decide cómo resolver duplicados.",
+    },
+    {
+      title: "Decisiones",
+      description: "Revisa cada caso y define la acción final.",
     },
     {
       title: "Claims y fórmulas",
@@ -516,6 +514,15 @@ export default function ImportPage() {
 
   function handleFinalizeImport() {
     setImportFinalized(true);
+    setStep(4);
+  }
+
+  function canNavigateToStep(index) {
+    if (index <= step) return true;
+    if (index <= 2) return true;
+    if (index === 3) return !!importResult;
+    if (index === 4) return importFinalized;
+    return false;
   }
 
   function handleDownloadConfig() {
@@ -590,8 +597,13 @@ export default function ImportPage() {
               <button
                 key={item.title}
                 type="button"
-                className={`stepper-item ${index === step ? "active" : ""}`}
-                onClick={() => setStep(index)}
+                className={`stepper-item ${index === step ? "active" : ""} ${
+                  !canNavigateToStep(index) ? "disabled" : ""
+                }`}
+                onClick={() => {
+                  if (canNavigateToStep(index)) setStep(index);
+                }}
+                disabled={!canNavigateToStep(index)}
               >
                 <div className="stepper-index">{index + 1}</div>
                 <div>
@@ -1049,62 +1061,6 @@ export default function ImportPage() {
                   </div>
                 )}
 
-                {importResult && reconciliationItems.length > 0 && (
-                  <div className="section-card reconciliation-decisions">
-                    <div className="section-header">
-                      <div>
-                        <h3 className="section-title">Reconciliación de registros</h3>
-                        <p className="section-subtitle">
-                          Ajusta la decisión por registro antes de finalizar.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={handleFinalizeImport}
-                        disabled={importFinalized}
-                      >
-                        {importFinalized ? "Importación finalizada" : "Finalizar importación"}
-                      </button>
-                    </div>
-
-                    <div className="reconcile-list">
-                      <div className="reconcile-header">
-                        <span>Registro</span>
-                        <span>Mejor coincidencia</span>
-                        <span>Confianza</span>
-                        <span>Decisión</span>
-                      </div>
-                      {reconciliationItems.map((item) => (
-                        <div key={item.id} className="reconcile-row">
-                          <div>
-                            <strong>{item.recordLabel}</strong>
-                          </div>
-                          <div>{item.matchLabel || "—"}</div>
-                          <div>{item.confidence.toFixed(2)}</div>
-                          <div>
-                            <select
-                              value={reconciliationDecisions[item.id] || "review"}
-                              onChange={(event) => handleDecisionChange(item.id, event.target.value)}
-                              disabled={importFinalized}
-                            >
-                              <option value="merge">Fusionar</option>
-                              <option value="create">Crear</option>
-                              <option value="skip">Omitir</option>
-                              <option value="review">Revisar</option>
-                            </select>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {importFinalized && (
-                      <div className="finalize-note">
-                        Se aplicaron las decisiones de reconciliación. Puedes continuar con los claims.
-                      </div>
-                    )}
-                  </div>
-                )}
                 {importResult && reconciliationItems.length === 0 && (
                   <div className="section-card light reconciliation-empty">
                     <h3 className="section-title">Sin registros para reconciliar</h3>
@@ -1119,10 +1075,75 @@ export default function ImportPage() {
 
           {step === 3 && (
             <section className="step-section">
+              <div className="section-card reconciliation-decisions">
+                <div className="section-header">
+                  <div>
+                    <h2 className="section-title">4. Decisiones de reconciliación</h2>
+                    <p className="section-subtitle">
+                      Revisa cada caso y confirma la acción final.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleFinalizeImport}
+                    disabled={importFinalized || reconciliationItems.length === 0}
+                  >
+                    {importFinalized ? "Importación finalizada" : "Finalizar importación"}
+                  </button>
+                </div>
+
+                {reconciliationItems.length === 0 ? (
+                  <div className="reconciliation-empty">
+                    No hay registros pendientes de decisión.
+                  </div>
+                ) : (
+                  <div className="reconcile-list">
+                    <div className="reconcile-header">
+                      <span>Registro</span>
+                      <span>Mejor coincidencia</span>
+                      <span>Confianza</span>
+                      <span>Decisión</span>
+                    </div>
+                    {reconciliationItems.map((item) => (
+                      <div key={item.id} className="reconcile-row">
+                        <div>
+                          <strong>{item.recordLabel}</strong>
+                        </div>
+                        <div>{item.matchLabel || "—"}</div>
+                        <div>{item.confidence.toFixed(2)}</div>
+                        <div>
+                          <select
+                            value={reconciliationDecisions[item.id] || "review"}
+                            onChange={(event) => handleDecisionChange(item.id, event.target.value)}
+                            disabled={importFinalized}
+                          >
+                            <option value="merge">Fusionar</option>
+                            <option value="create">Crear</option>
+                            <option value="skip">Omitir</option>
+                            <option value="review">Revisar</option>
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {importFinalized && (
+                  <div className="finalize-note">
+                    Se aplicaron las decisiones. Ahora puedes continuar con los claims.
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {step === 4 && (
+            <section className="step-section">
               <div className="section-card">
                 <div className="section-header">
                   <div>
-                    <h2 className="section-title">4. Campos calculados</h2>
+                    <h2 className="section-title">5. Campos calculados</h2>
                     <p className="section-subtitle">
                       Define fórmulas o scripts JS reutilizables para claims, qualifiers y references.
                     </p>
@@ -1294,63 +1315,6 @@ export default function ImportPage() {
                 )}
               </div>
 
-              <div className="section-card">
-                <div className="section-header">
-                  <div>
-                    <h2 className="section-title">Ejemplo de claim final</h2>
-                    <p className="section-subtitle">
-                      Este ejemplo usa tus expresiones para visualizar el resultado final.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>Propiedad</label>
-                    <input
-                      type="text"
-                      value={exampleClaimTemplate.property}
-                      onChange={(event) =>
-                        setExampleClaimTemplate((prev) => ({
-                          ...prev,
-                          property: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Valor</label>
-                    <input
-                      type="text"
-                      value={exampleClaimTemplate.valueExpr}
-                      onChange={(event) =>
-                        setExampleClaimTemplate((prev) => ({
-                          ...prev,
-                          valueExpr: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="example-box">
-                  <div>
-                    <strong>Claim:</strong> {exampleClaimTemplate.property} → {exampleClaimTemplate.valueExpr}
-                  </div>
-                  <div>
-                    <strong>Qualifiers:</strong>{" "}
-                    {exampleClaimTemplate.qualifiers
-                      .map((item) => `${item.property} → ${item.valueExpr}`)
-                      .join(" · ")}
-                  </div>
-                  <div>
-                    <strong>References:</strong>{" "}
-                    {exampleClaimTemplate.references
-                      .map((item) => `${item.property} → ${item.valueExpr}`)
-                      .join(" · ")}
-                  </div>
-                </div>
-              </div>
             </section>
           )}
 
@@ -1367,7 +1331,7 @@ export default function ImportPage() {
               type="button"
               className="btn btn-primary"
               onClick={() => setStep((prev) => Math.min(prev + 1, steps.length - 1))}
-              disabled={step === steps.length - 1}
+              disabled={step === steps.length - 1 || (step === 3 && !importFinalized)}
             >
               Siguiente
             </button>
