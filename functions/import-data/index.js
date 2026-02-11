@@ -8,13 +8,37 @@ import * as XLSX from "xlsx";
  */
 export default async function main(req, res) {
   try {
-    // Leer config y archivo
-    const configJson = req.variables["config"] || req.payload?.config;
-    const file = req.files?.file || req.payload?.file;
-    if (!configJson || !file) {
-      return res.json({ error: "Faltan datos" }, 400);
+    // Debug: log all incoming request data
+    console.log('[DEBUG] req:', JSON.stringify(req, null, 2));
+    console.log('[DEBUG] req.files:', req.files);
+    console.log('[DEBUG] req.payload:', req.payload);
+    console.log('[DEBUG] req.variables:', req.variables);
+
+    // Try to extract config and file from all possible locations
+    let configJson = undefined;
+    let file = undefined;
+    if (req.variables && req.variables.config) configJson = req.variables.config;
+    if (req.payload && req.payload.config) configJson = req.payload.config;
+    if (req.files && req.files.file) file = req.files.file;
+    if (req.payload && req.payload.file) file = req.payload.file;
+
+    // Fallback: try to find first file in req.files
+    if (!file && req.files && typeof req.files === 'object') {
+      const fileKeys = Object.keys(req.files);
+      if (fileKeys.length > 0) file = req.files[fileKeys[0]];
     }
-    const config = typeof configJson === "string" ? JSON.parse(configJson) : configJson;
+
+    if (!configJson || !file) {
+      console.error('[ERROR] config o file no encontrados', { configJson, file });
+      return res.json({ error: "Faltan datos (config o file no encontrados)", debug: { configJson, file } }, 400);
+    }
+    let config;
+    try {
+      config = typeof configJson === "string" ? JSON.parse(configJson) : configJson;
+    } catch (e) {
+      console.error('[ERROR] No se pudo parsear configJson', configJson, e);
+      return res.json({ error: "Config inválido", debug: { configJson } }, 400);
+    }
 
     // Inicializar Appwrite
     const client = new Client()
@@ -102,7 +126,8 @@ export default async function main(req, res) {
     }
     return res.json({ ok: true, results });
   } catch (err) {
-    return res.json({ error: err?.message || "Error en importación" }, 500);
+    console.error('[ERROR] import-data main catch', err);
+    return res.json({ error: err?.message || "Error en importación", debug: { stack: err?.stack } }, 500);
   }
 }
 
