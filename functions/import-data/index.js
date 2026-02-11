@@ -9,18 +9,18 @@ import * as XLSX from "xlsx";
 export default async function main(req, res) {
     try {
         // Usar solo req.files y req.variables, nunca parsear JSON del body
-        context.log('req.files:', req.files);
-        context.log('req.variables:', req.variables);
+        console.log('req.files:', req.files);
+        console.log('req.variables:', req.variables);
 
         const configRaw = req.variables?.config;
         const file = req.files?.file;
 
         if (!configRaw) {
-            context.error('Missing config in req.variables');
+            console.error('Missing config in req.variables');
             return res.json({ error: 'Missing config in req.variables' }, 400);
         }
         if (!file) {
-            context.error('Missing file in req.files');
+            console.error('Missing file in req.files');
             return res.json({ error: 'Missing file in req.files' }, 400);
         }
 
@@ -30,16 +30,16 @@ export default async function main(req, res) {
             try {
                 config = JSON.parse(configRaw);
             } catch (e) {
-                context.error('Config is not valid JSON:', configRaw);
+                console.error('Config is not valid JSON:', configRaw);
                 return res.json({ error: 'Config is not valid JSON', details: configRaw }, 400);
             }
         }
 
         // ...aquí iría la lógica de importación usando config y file...
-        context.log('Config and file received, ready to process.');
+        console.log('Config and file received, ready to process.');
         return res.json({ ok: true, debug: { config, fileName: file.name } });
     } catch (err) {
-        context.error('import-data main catch', err);
+        console.error('import-data main catch', err);
         return res.json({ error: err.message || err.toString() }, 500);
     }
 }
