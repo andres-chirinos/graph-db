@@ -1,0 +1,10 @@
+{
+  "name": "import-data",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "appwrite": "^13.0.0",
+    "xlsx": "^0.18.5"
+  }
+}
