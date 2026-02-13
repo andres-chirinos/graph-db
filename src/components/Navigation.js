@@ -97,10 +97,6 @@ export default function Navigation() {
               <span className="icon-list"></span>
               <span>Entidades</span>
             </Link>
-            <Link href="/import" className="nav-link">
-              <span className="icon-upload"></span>
-              <span>Importación</span>
-            </Link>
           </div>
 
           <div className="nav-search" ref={searchRef}>
