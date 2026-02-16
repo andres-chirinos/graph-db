@@ -27,6 +27,7 @@ export default function ValueInput({
   label,
   required = false,
   disabled = false,
+  onUploadStatusChange,
 }) {
   const [datatype, setDatatype] = useState("string");
   const [data, setData] = useState("");
@@ -375,6 +376,7 @@ export default function ValueInput({
 
                     setImageError(null);
                     setImageUploading(true);
+                    onUploadStatusChange?.(true);
                     try {
                       const uploaded = await uploadFileByDatatype("image", file, file.name || "image");
                       handleChange(datatype, {
@@ -389,6 +391,7 @@ export default function ValueInput({
                       setImageError("No se pudo subir la imagen.");
                     } finally {
                       setImageUploading(false);
+                      onUploadStatusChange?.(false); // Notify parent that upload finished
                       e.target.value = "";
                     }
                   }}
@@ -603,6 +606,7 @@ export default function ValueInput({
 
                     setPolygonError(null);
                     setPolygonUploading(true);
+                    onUploadStatusChange?.(true); // Notify parent that upload started
                     try {
                       const content = await file.text();
                       const parsed = JSON.parse(content);
@@ -619,6 +623,7 @@ export default function ValueInput({
                       setPolygonError("El archivo no es un GeoJSON válido o no se pudo subir.");
                     } finally {
                       setPolygonUploading(false);
+                      onUploadStatusChange?.(false); // Notify parent that upload finished
                       e.target.value = "";
                     }
                   }}

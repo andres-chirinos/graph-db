@@ -223,7 +223,7 @@ function QualifierItem({ qualifier, editable, onEdit, onDelete }) {
   async function handleDelete() {
     setDeleting(true);
     try {
-      await onDelete?.(qualifier.$id);
+      await onDelete?.(qualifier.$id, qualifier.claim);
       setShowDeleteConfirm(false);
     } catch (e) {
       console.error("Error deleting qualifier:", e);
@@ -289,7 +289,7 @@ function QualifierItem({ qualifier, editable, onEdit, onDelete }) {
           isOpen={showEditForm}
           onClose={() => setShowEditForm(false)}
           onSave={async (data) => {
-            await onEdit?.(data, qualifier.$id);
+            await onEdit?.(data, qualifier.$id, qualifier.claim);
           }}
           qualifier={qualifier}
           claimId={qualifier.claim}
@@ -331,7 +331,7 @@ function ReferenceItem({ reference, editable, onEdit, onDelete }) {
   async function handleDelete() {
     setDeleting(true);
     try {
-      await onDelete?.(reference.$id);
+      await onDelete?.(reference.$id, reference.claim);
       setShowDeleteConfirm(false);
     } catch (e) {
       console.error("Error deleting reference:", e);
@@ -383,7 +383,7 @@ function ReferenceItem({ reference, editable, onEdit, onDelete }) {
           isOpen={showEditForm}
           onClose={() => setShowEditForm(false)}
           onSave={async (data) => {
-            await onEdit?.(data, reference.$id);
+            await onEdit?.(data, reference.$id, reference.claim);
           }}
           reference={reference}
           claimId={reference.claim}
