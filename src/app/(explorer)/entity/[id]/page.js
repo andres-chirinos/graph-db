@@ -107,45 +107,53 @@ export default function EntityPage({ params }) {
   // ==================== CLAIM HANDLERS ====================
   async function handleCreateClaim(data) {
     const teamId = activeTeam?.$id || null;
-    await createClaim(data, teamId);
-    await loadEntity();
+    const newClaimRaw = await createClaim(data, teamId);
+    const newClaim = await getClaim(newClaimRaw.$id); // Fetch fully expanded claim
+    setClaims(prev => [...prev, newClaim]);
   }
 
   async function handleUpdateClaim(data, claimId) {
     await updateClaim(claimId, data);
-    await loadEntity();
+    const updatedClaim = await getClaim(claimId);
+    setClaims(prev => prev.map(c => c.$id === claimId ? updatedClaim : c));
   }
 
   async function handleDeleteClaim(claimId) {
     await deleteClaim(claimId);
-    await loadEntity();
+    setClaims(prev => prev.filter(c => c.$id !== claimId));
   }
 
   // ==================== QUALIFIER HANDLERS ====================
   async function handleCreateQualifier(data) {
     const teamId = activeTeam?.$id || null;
     await createQualifier(data, teamId);
-    await loadEntity();
+    const claimId = data.claim; // data.claim is passed from ClaimsList -> ClaimItem -> AddQualifierButton
+    const updatedClaim = await getClaim(claimId);
+    setClaims(prev => prev.map(c => c.$id === claimId ? updatedClaim : c));
   }
 
-  async function handleUpdateQualifier(data, qualifierId) {
+  async function handleUpdateQualifier(data, qualifierId, claimId) {
     await updateQualifier(qualifierId, data);
-    await loadEntity();
+    const updatedClaim = await getClaim(claimId);
+    setClaims(prev => prev.map(c => c.$id === claimId ? updatedClaim : c));
   }
 
-  async function handleDeleteQualifier(qualifierId) {
+  async function handleDeleteQualifier(qualifierId, claimId) {
     await deleteQualifier(qualifierId);
-    await loadEntity();
+    const updatedClaim = await getClaim(claimId);
+    setClaims(prev => prev.map(c => c.$id === claimId ? updatedClaim : c));
   }
 
   // ==================== REFERENCE HANDLERS ====================
   async function handleCreateReference(data) {
     const teamId = activeTeam?.$id || null;
     await createReference(data, teamId);
-    await loadEntity();
+    const claimId = data.claim; // data.claim is passed from ClaimsList -> ClaimItem -> AddReferenceButton
+    const updatedClaim = await getClaim(claimId);
+    setClaims(prev => prev.map(c => c.$id === claimId ? updatedClaim : c));
   }
 
-  async function handleUpdateReference(data, referenceId) {
+  async function handleUpdateReference(data, referenceId, claimId) {
     await updateReference(referenceId, data);
     await loadEntity();
   }
@@ -257,8 +265,8 @@ export default function EntityPage({ params }) {
               <h2 className="section-title">
                 <span className="icon-arrow-left"></span>
                 Lo que enlaza aquí
-              </h2>
-              <p className="section-description">
+              </h2
+              ><p className="section-description">
                 Entidades que hacen referencia a esta entidad
               </p>
               <div className="incoming-claims-list">

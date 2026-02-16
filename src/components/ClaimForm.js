@@ -18,6 +18,7 @@ export default function ClaimForm({
   const isEditing = !!claim;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isChildUploading, setIsChildUploading] = useState(false); // New state for child component upload status
 
   const [property, setProperty] = useState(claim?.property?.$id || "");
   const [valueType, setValueType] = useState(
@@ -42,10 +43,19 @@ export default function ClaimForm({
           ? "entity"
           : valueRaw?.datatype || claim?.datatype || claim?.property?.datatype || "string";
 
+      let finalValueRaw = null;
+      if (valueType === "raw") {
+        if (valueRaw?.datatype === "image" || valueRaw?.datatype === "polygon") {
+          finalValueRaw = valueRaw?.data?.url ?? null;
+        } else {
+          finalValueRaw = valueRaw?.data ?? null;
+        }
+      }
+
       const data = {
         property: property || null,
         datatype: resolvedDatatype,
-        value_raw: valueType === "raw" ? valueRaw?.data ?? null : null,
+        value_raw: finalValueRaw,
         value_relation: valueType === "relation" ? valueRelation : null,
       };
 
@@ -69,7 +79,7 @@ export default function ClaimForm({
       title={isEditing ? "Editar declaración" : "Nueva declaración"}
       onSubmit={handleSubmit}
       submitLabel={isEditing ? "Guardar cambios" : "Crear declaración"}
-      loading={loading}
+      loading={loading || isChildUploading} // Modify this line
       size="medium"
     >
       {error && <div className="form-error">{error}</div>}
@@ -102,7 +112,8 @@ export default function ClaimForm({
               type="radio"
               name="valueType"
               value="relation"
-              checked={valueType === "relation"}
+              c
+              hecked={valueType === "relation"}
               onChange={() => setValueType("relation")}
             />
             Relación a entidad
@@ -116,6 +127,7 @@ export default function ClaimForm({
             label="Valor"
             value={valueRaw}
             onChange={setValueRaw}
+            onUploadStatusChange={setIsChildUploading} // New prop
             required
           />
         </div>
