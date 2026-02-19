@@ -144,6 +144,21 @@ export async function _searchClaimsBySchemaCondition(claimSchema, limit = 50, of
 }
 
 /**
+ * Helper para poblar un claim con sus qualifiers y references
+ */
+async function expandClaimDetails(claim) {
+  // Obtener qualifiers
+  const qualifiers = await getQualifiersByClaim(claim.$id);
+  claim.qualifiersList = qualifiers;
+
+  // Obtener references
+  const references = await getReferencesByClaim(claim.$id);
+  claim.referencesList = references;
+
+  return claim;
+}
+
+/**
  * Obtiene todos los claims de un sujeto (entidad)
  * Incluye los datos expandidos de property y value_relation
  */
@@ -192,7 +207,7 @@ export async function getClaimsByValueRelation(entityId, options = {}) {
     queries,
   });
 
-  return result.rows;
+  return Promise.all(result.rows.map(claim => expandClaimDetails(claim)));
 }
 
 /**
@@ -219,7 +234,7 @@ export async function getClaimsByProperty(propertyId, options = {}) {
     queries,
   });
 
-  return result.rows;
+  return Promise.all(result.rows.map(claim => expandClaimDetails(claim)));
 }
 
 /**
@@ -236,15 +251,7 @@ export async function getClaim(claimId) {
     ],
   });
 
-  // Obtener qualifiers
-  const qualifiers = await getQualifiersByClaim(claimId);
-  claim.qualifiersList = qualifiers;
-
-  // Obtener references
-  const references = await getReferencesByClaim(claimId);
-  claim.referencesList = references;
-
-  return claim;
+  return expandClaimDetails(claim);
 }
 
 /**

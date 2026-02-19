@@ -1035,6 +1035,35 @@ export async function getReferencesByClaim(claimId) {
 }
 
 /**
+ * Obtiene las referencias donde una entidad es usada como referencia (reference).
+ * @param {string} entityId - ID de la entidad.
+ * @param {Object} options - { filters: {claim}, page, pageSize }
+ * @returns {Promise<Array>}
+ */
+export async function getReferencesByEntityRole(entityId, options = {}) {
+  const { filters = {}, page = 1, pageSize = 10 } = options;
+  const queries = [
+    Query.equal("reference", entityId),
+    Query.select(["*", "claim.*", "reference.*"]),
+    Query.offset((page - 1) * pageSize),
+    Query.limit(pageSize),
+  ];
+
+  if (filters.claim) {
+    // This filter applies to the claim of the reference
+    queries.push(Query.equal("claim", filters.claim));
+  }
+
+  const result = await tablesDB.listRows({
+    databaseId: DATABASE_ID,
+    tableId: TABLES.REFERENCES,
+    queries,
+  });
+
+  return result.rows;
+}
+
+/**
  * Crea una nueva referencia
  * @param {Object} data - Datos de la referencia
  * @param {string} teamId - ID del team que crea la referencia (opcional)

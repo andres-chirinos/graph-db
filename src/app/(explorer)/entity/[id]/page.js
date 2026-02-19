@@ -3,13 +3,14 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState, ValueRenderer } from "@/components";
+import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState, ValueRenderer, ClaimItem } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import { 
   getEntity, 
   getClaim, 
   getClaimsByValueRelation, 
   getClaimsByProperty,
+  getReferencesByEntityRole,
   updateEntity,
   deleteEntity,
   createClaim,
@@ -33,6 +34,7 @@ export default function EntityPage({ params }) {
   const [claims, setClaims] = useState([]);
   const [incomingClaims, setIncomingClaims] = useState([]);
   const [usedAsProperty, setUsedAsProperty] = useState([]);
+  const [referencedInClaims, setReferencedInClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -86,6 +88,20 @@ export default function EntityPage({ params }) {
       // Cargar claims donde esta entidad es usada como propiedad
       const asProperty = await getClaimsByProperty(id);
       setUsedAsProperty(asProperty);
+
+      // Cargar claims donde esta entidad es usada como referencia
+      const references = await getReferencesByEntityRole(id);
+      const referencedInClaimIds = references.map(ref => ref.claim?.$id).filter(Boolean);
+      const uniqueClaimIds = [...new Set(referencedInClaimIds)];
+      if (uniqueClaimIds.length > 0) {
+        const claimsFromReferences = await Promise.all(
+            uniqueClaimIds.map(claimId => getClaim(claimId))
+        );
+        setReferencedInClaims(claimsFromReferences);
+      } else {
+        setReferencedInClaims([]);
+      }
+
     } catch (err) {
       setError(err);
     } finally {
@@ -271,20 +287,36 @@ export default function EntityPage({ params }) {
               </p>
               <div className="incoming-claims-list">
                 {incomingClaims.map((claim) => (
-                  <div key={claim.$id} className="incoming-claim-item">
-                    <Link 
-                      href={`/entity/${claim.subject?.$id}`} 
-                      className="incoming-subject"
-                    >
-                      {claim.subject?.label || claim.subject?.$id}
-                    </Link>
-                    <span className="incoming-property">
-                      {claim.property?.label || claim.property?.$id}
-                    </span>
-                    <span className="incoming-arrow">→</span>
-                    <span className="incoming-value-self">
-                      {entity.label || entity.$id}
-                    </span>
+                  <div key={claim.$id} className="incoming-claim-item with-qualifiers">
+                    <div className="claim-main-line">
+                      <Link href={`/entity/${claim.subject?.$id}`} className="incoming-subject">
+                        {claim.subject?.label || claim.subject?.$id}
+                      </Link>
+                      <span className="incoming-property">
+                        {claim.property?.label || claim.property?.$id}
+                      </span>
+                      <span className="incoming-arrow">→</span>
+                      <span className="incoming-value-self">
+                        {entity.label || entity.$id}
+                      </span>
+                    </div>
+                    {claim.qualifiersList && claim.qualifiersList.length > 0 && (
+                      <div className="claim-qualifiers">
+                        {claim.qualifiersList.map(qualifier => {
+                          const parsedQualifierValue = normalizeValue(qualifier.value_raw, qualifier.datatype || qualifier.property?.datatype || "string");
+                          return (
+                            <div key={qualifier.$id} className="qualifier-item">
+                              <span className="qualifier-property">
+                                {qualifier.property ? (<Link href={`/entity/${qualifier.property.$id}`}>{qualifier.property.label || qualifier.property.$id}</Link>) : ("(Propiedad)")}
+                              </span>
+                              <span className="qualifier-value">
+                                {qualifier.value_relation ? (<Link href={`/entity/${qualifier.value_relation.$id}`}>{qualifier.value_relation.label || qualifier.value_relation.$id}</Link>) : parsedQualifierValue ? (<ValueRenderer value={parsedQualifierValue} compact />) : ("(Sin valor)")}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -303,40 +335,69 @@ export default function EntityPage({ params }) {
               </p>
               <div className="incoming-claims-list">
                 {usedAsProperty.map((claim) => (
-                  <div key={claim.$id} className="incoming-claim-item">
-                    <Link 
-                      href={`/entity/${claim.subject?.$id}`} 
-                      className="incoming-subject"
-                    >
-                      {claim.subject?.label || claim.subject?.$id}
-                    </Link>
-                    <span className="incoming-property-self">
-                      {entity.label || entity.$id}
-                    </span>
-                    <span className="incoming-arrow">→</span>
-                    {claim.value_relation ? (
-                      <Link 
-                        href={`/entity/${claim.value_relation.$id}`}
-                        className="incoming-value"
-                      >
-                        {claim.value_relation.label || claim.value_relation.$id}
+                  <div key={claim.$id} className="incoming-claim-item with-qualifiers">
+                    <div className="claim-main-line">
+                      <Link href={`/entity/${claim.subject?.$id}`} className="incoming-subject">
+                        {claim.subject?.label || claim.subject?.$id}
                       </Link>
-                    ) : (
-                      <span className="incoming-value-raw">
-                        {claim.value_raw !== null && claim.value_raw !== undefined ? (
-                          <ValueRenderer
-                            value={normalizeValue(
-                              claim.value_raw,
-                              claim.datatype || claim.property?.datatype || "string"
-                            )}
-                            compact
-                          />
-                        ) : (
-                          "(valor)"
-                        )}
+                      <span className="incoming-property-self">
+                        {entity.label || entity.$id}
                       </span>
+                      <span className="incoming-arrow">→</span>
+                      {claim.value_relation ? (
+                        <Link href={`/entity/${claim.value_relation.$id}`} className="incoming-value">
+                          {claim.value_relation.label || claim.value_relation.$id}
+                        </Link>
+                      ) : (
+                        <span className="incoming-value-raw">
+                          {claim.value_raw !== null && claim.value_raw !== undefined ? (
+                            <ValueRenderer value={normalizeValue(claim.value_raw, claim.datatype || claim.property?.datatype || "string")} compact />
+                          ) : (
+                            "(valor)"
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    {claim.qualifiersList && claim.qualifiersList.length > 0 && (
+                      <div className="claim-qualifiers">
+                        {claim.qualifiersList.map(qualifier => {
+                          const parsedQualifierValue = normalizeValue(qualifier.value_raw, qualifier.datatype || qualifier.property?.datatype || "string");
+                          return (
+                            <div key={qualifier.$id} className="qualifier-item">
+                              <span className="qualifier-property">
+                                {qualifier.property ? (<Link href={`/entity/${qualifier.property.$id}`}>{qualifier.property.label || qualifier.property.$id}</Link>) : ("(Propiedad)")}
+                              </span>
+                              <span className="qualifier-value">
+                                {qualifier.value_relation ? (<Link href={`/entity/${qualifier.value_relation.$id}`}>{qualifier.value_relation.label || qualifier.value_relation.$id}</Link>) : parsedQualifierValue ? (<ValueRenderer value={parsedQualifierValue} compact />) : ("(Sin valor)")}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Referenced In - Where this entity is used as a reference */}
+          {referencedInClaims.length > 0 && (
+            <section className="entity-referenced-in">
+              <h2 className="section-title">
+                <span className="icon-book"></span>
+                Citado en
+              </h2>
+              <p className="section-description">
+                Declaraciones que citan a esta entidad como fuente/referencia
+              </p>
+              <div className="claims-list">
+                {referencedInClaims.map((claim) => (
+                  <ClaimItem
+                    key={claim.$id}
+                    claim={claim}
+                    editable={false}
+                  />
                 ))}
               </div>
             </section>

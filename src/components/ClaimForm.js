@@ -112,8 +112,7 @@ export default function ClaimForm({
               type="radio"
               name="valueType"
               value="relation"
-              c
-              hecked={valueType === "relation"}
+              checked={valueType === "relation"}
               onChange={() => setValueType("relation")}
             />
             Relación a entidad
