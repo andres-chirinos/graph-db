@@ -12,6 +12,10 @@ export default function Footer() {
                     <p className="text-sm text-gray-500">© {new Date().getFullYear()} Todos los derechos reservados.</p>
                 </div>
                 <nav className="flex gap-8">
+                    <Link href="/statistics" className="nav-link flex items-center gap-2 hover:text-blue-600 transition-colors">
+                        <span className="icon-activity" aria-hidden="true"></span>
+                        <span>Estadísticas</span>
+                    </Link>
                     <Link href="/graphql" className="nav-link flex items-center gap-2 hover:text-blue-600 transition-colors">
                         <span className="icon-code" aria-hidden="true"></span>
                         <span>GraphQL</span>

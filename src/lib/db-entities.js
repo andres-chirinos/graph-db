@@ -656,3 +656,71 @@ export async function deleteEntity(entityId) {
     return wrapTransactionResult(result, changes);
   });
 }
+
+/**
+ * Gets global statistics for the knowledge graph.
+ * Returns total counts for Entities, Claims, Qualifiers, and References.
+ */
+export async function getGlobalStats() {
+  try {
+    // Run counts in parallel
+    const [entities, claims, qualifiers, references] = await Promise.all([
+      tablesDB.listRows({ databaseId: DATABASE_ID, tableId: TABLES.ENTITIES, queries: [Query.limit(1)] }),
+      tablesDB.listRows({ databaseId: DATABASE_ID, tableId: TABLES.CLAIMS, queries: [Query.limit(1)] }),
+      tablesDB.listRows({ databaseId: DATABASE_ID, tableId: TABLES.QUALIFIERS, queries: [Query.limit(1)] }),
+      tablesDB.listRows({ databaseId: DATABASE_ID, tableId: TABLES.REFERENCES, queries: [Query.limit(1)] }),
+    ]);
+
+    return {
+      entityCount: entities.total,
+      claimCount: claims.total,
+      qualifierCount: qualifiers.total,
+      referenceCount: references.total
+    };
+  } catch (error) {
+    console.error("Error fetching global stats:", error);
+    return { entityCount: 0, claimCount: 0, qualifierCount: 0, referenceCount: 0 };
+  }
+}
+
+/**
+ * Fetches data for the global graph visualization.
+ * Fetches the top N entities (by recent update or other metric) and their connections.
+ * 
+ * @param {number} limit - Max number of entities to fetch (default 50)
+ */
+export async function getGlobalGraphData(limit = 50) {
+  try {
+    // 1. Fetch top entities
+    const entitiesRes = await tablesDB.listRows({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.ENTITIES,
+      queries: [
+        Query.limit(limit),
+        Query.orderDesc("$updatedAt") // Get most recently active/updated
+      ]
+    });
+
+    const entities = entitiesRes.rows;
+
+    // 2. Fetch recent claims to build edges between entities
+    const claimsRes = await tablesDB.listRows({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      queries: [
+        Query.limit(limit * 3), // Fetch more claims than entities to ensure some connectivity
+        Query.orderDesc("$updatedAt"),
+        Query.select(["*", "subject.*", "property.*", "value_relation.*"])
+      ]
+    });
+
+    return {
+      entities,
+      claims: claimsRes.rows
+    };
+
+  } catch (error) {
+    console.error("Error fetching global graph data:", error);
+    return { entities: [], claims: [] };
+  }
+}

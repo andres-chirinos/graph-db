@@ -1,0 +1,75 @@
+/* Global Statistics Page Styles */
+
+/* Grid Layouts */
+.stats-grid {
+    @apply grid grid-cols-2 md:grid-cols-4 gap-4;
+}
+
+.charts-grid {
+    @apply grid grid-cols-1 lg:grid-cols-2 gap-6;
+}
+
+/* Stat Cards */
+.stat-card {
+    @apply p-4 rounded-lg flex items-center justify-between border transition-all hover:shadow-md;
+}
+
+.stat-card-title {
+    @apply text-sm font-medium text-gray-500 dark:text-gray-400;
+}
+
+.stat-card-value {
+    @apply text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1;
+}
+
+/* Specific Card Colors */
+.stat-card-blue {
+    @apply bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800;
+}
+
+.stat-card-green {
+    @apply bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800;
+}
+
+.stat-card-amber {
+    @apply bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800;
+}
+
+.stat-card-pink {
+    @apply bg-pink-50 dark:bg-pink-900/20 border-pink-100 dark:border-pink-800;
+}
+
+/* Chart Container */
+.chart-container {
+    @apply bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm animate-fadeIn;
+}
+
+.chart-title {
+    @apply text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100;
+}
+
+.chart-canvas {
+    @apply h-64 w-full;
+}
+
+/* Graph Container */
+.graph-container {
+    @apply relative w-full h-[600px] border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-900 group shadow-sm animate-fadeIn;
+}
+
+/* Info Panel */
+.info-panel {
+    @apply p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm animate-fadeIn mt-4;
+}
+
+.info-panel-title {
+    @apply text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2;
+}
+
+.info-panel-details {
+    @apply mt-2 text-sm text-gray-600 dark:text-gray-300;
+}
+
+.info-label {
+    @apply font-semibold text-xs uppercase tracking-wider text-gray-400;
+}
