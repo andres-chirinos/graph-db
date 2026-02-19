@@ -85,7 +85,7 @@ export default function Navigation() {
         <div className="nav-container">
           <Link href="/" className="nav-logo">
             <span className="icon-database logo-icon"></span>
-            <span className="logo-text">Graph DB</span>
+            <span className="logo-text">Base de Conocimiento</span>
           </Link>
 
           <div className="nav-links">

@@ -1,5 +1,5 @@
 /* ============================================
-   GRAPH DB EXPLORER
+   BASE DE CONOCIMIENTO
    ============================================ */
 
 /* CSS Variables */
@@ -11,28 +11,28 @@
   --color-success: #14866d;
   --color-warning: #fc3;
   --color-error: #d33;
-  
+
   --color-bg: #f8f9fa;
   --color-bg-alt: #eaecf0;
   --color-bg-card: #ffffff;
   --color-border: #a2a9b1;
   --color-border-light: #c8ccd1;
-  
+
   --color-text: #202122;
   --color-text-secondary: #54595d;
   --color-text-muted: #72777d;
-  
+
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'Fira Code', 'Consolas', monospace;
-  
+
   --radius-sm: 2px;
   --radius-md: 4px;
   --radius-lg: 8px;
-  
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
-  
+
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
   --spacing-md: 1rem;
@@ -168,7 +168,7 @@
   background: var(--color-bg-card, #ffffff);
   border: 1px solid var(--color-border-light, #c8ccd1);
   border-radius: var(--radius-md, 4px);
-  box-shadow: var(--shadow-lg, 0 4px 16px rgba(0,0,0,0.15));
+  box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.15));
   z-index: 200;
   padding: 0.5rem 0;
 }
@@ -1249,7 +1249,9 @@
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .error-icon,
@@ -2762,11 +2764,11 @@
   .wdqs-layout {
     grid-template-columns: 1fr;
   }
-  
+
   .wdqs-sidebar {
     display: none;
   }
-  
+
   .wdqs-layout.collapsed .wdqs-sidebar {
     display: none;
   }
@@ -2776,24 +2778,24 @@
   .hero-title {
     font-size: 1.75rem;
   }
-  
+
   .entities-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .nav-links span:not([class^="icon"]) {
     display: none;
   }
-  
+
   .claim-main {
     flex-direction: column;
     gap: var(--spacing-xs);
   }
-  
+
   .claim-property {
     min-width: auto;
   }
-  
+
   .entity-header-meta {
     flex-direction: column;
     gap: var(--spacing-sm);
@@ -2846,8 +2848,13 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .crud-modal {
@@ -2864,11 +2871,12 @@
 }
 
 @keyframes slideUp {
-  from { 
+  from {
     opacity: 0;
     transform: translateY(20px);
   }
-  to { 
+
+  to {
     opacity: 1;
     transform: translateY(0);
   }
@@ -3157,11 +3165,11 @@
     max-height: 100vh;
     border-radius: 0;
   }
-  
+
   .crud-modal-footer {
     flex-direction: column;
   }
-  
+
   .crud-cancel-btn,
   .crud-submit-btn {
     width: 100%;
