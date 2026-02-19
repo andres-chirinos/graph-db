@@ -18,11 +18,6 @@ export default function SearchPage() {
           </Suspense>
         </div>
       </main>
-
-      <footer className="explorer-footer">
-        <p>Graph DB Explorer</p>
-      </footer>
-
     </div>
   );
 }

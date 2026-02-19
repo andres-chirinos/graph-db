@@ -7,7 +7,7 @@ import { EntitySelector, Navigation, ClaimForm, QualifierForm, ReferenceForm } f
 import * as XLSX from "xlsx";
 
 import "./style.css";
-import { createEntity, createClaim, createQualifier, createReference, runImportFromConfigWithFile, mapRowValues,parseImportFile } from "@/lib/database";
+import { createEntity, createClaim, createQualifier, createReference, runImportFromConfigWithFile, mapRowValues, parseImportFile } from "@/lib/database";
 
 const DEFAULT_FIELDS = [
     { id: "field-1", name: "label", source: "Columna A", type: "text", required: true },
@@ -1475,10 +1475,6 @@ export default function ImportPage() {
                     </details>
                 </div>
             </main>
-
-            <footer className="explorer-footer">
-                <p>Graph DB Explorer</p>
-            </footer>
         </div>
     );
 }

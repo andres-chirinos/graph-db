@@ -714,14 +714,6 @@ export default function AccountPage() {
         </div>
       </main>
 
-      <footer className="explorer-footer">
-        <p>Graph DB Explorer</p>
-        <Link href="/graphql" className="nav-link">
-          <span className="icon-code"></span>
-          <span>GraphQL</span>
-        </Link>
-      </footer>
-
       {showPasswordModal && (
         <div className="account-modal-overlay">
           <div className="account-modal">

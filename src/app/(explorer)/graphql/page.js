@@ -288,7 +288,7 @@ function convertToCSV(data, separator = ",") {
 
   const headers = [...new Set(processedRows.flatMap((row) => Object.keys(row)))];
   const csvRows = [headers.join(separator)];
-  
+
   for (const row of processedRows) {
     const values = headers.map((h) => {
       const val = row[h];
@@ -831,8 +831,8 @@ export default function GraphQLPage() {
               {/* Selector de tabla */}
               <div className="crud-field">
                 <label>Tabla:</label>
-                <select 
-                  value={crudTable} 
+                <select
+                  value={crudTable}
                   onChange={(e) => {
                     setCrudTable(e.target.value);
                     setCrudData(getDefaultCrudData(e.target.value));
@@ -1017,7 +1017,7 @@ export default function GraphQLPage() {
 
               {crudMode === "delete" && (
                 <div className="crud-warning">
-                  ⚠️ <strong>Advertencia:</strong> Esta acción eliminará permanentemente el registro. 
+                  ⚠️ <strong>Advertencia:</strong> Esta acción eliminará permanentemente el registro.
                   Esta operación no se puede deshacer.
                 </div>
               )}
@@ -1040,25 +1040,21 @@ export default function GraphQLPage() {
               <button className="crud-cancel-btn" onClick={() => setShowCrudModal(false)}>
                 Cancelar
               </button>
-              <button 
-                className={`crud-submit-btn ${crudMode}`} 
-                onClick={executeCrud} 
+              <button
+                className={`crud-submit-btn ${crudMode}`}
+                onClick={executeCrud}
                 disabled={loading}
               >
                 {loading ? "⏳ Procesando..." : (
                   crudMode === "create" ? "➕ Crear" :
-                  crudMode === "update" ? "✏️ Actualizar" :
-                  "🗑️ Eliminar"
+                    crudMode === "update" ? "✏️ Actualizar" :
+                      "🗑️ Eliminar"
                 )}
               </button>
             </div>
           </div>
         </div>
       )}
-
-      <footer className="explorer-footer">
-        <p>Graph DB Explorer — GraphQL Query Service</p>
-      </footer>
     </div>
   );
 }

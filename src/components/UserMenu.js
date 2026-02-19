@@ -106,13 +106,6 @@ export default function UserMenu({ onLoginClick }) {
             </Link>
           )}
 
-          {isAuthenticated && (
-            <Link href="/import" className="dropdown-item" onClick={() => setShowTeamSelector(false)}>
-              <span className="icon-import"></span>
-              <span>Importar</span>
-            </Link>
-          )}
-
           {isAdmin && (
             <Link href="/admin" className="dropdown-item" onClick={() => setShowTeamSelector(false)}>
               <span className="icon-settings"></span>

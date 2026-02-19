@@ -15,17 +15,17 @@ import "./style.css";
 
 export default function AdminPage() {
   const router = useRouter();
-  const { 
-    user, 
-    isAuthenticated, 
-    authEnabled, 
+  const {
+    user,
+    isAuthenticated,
+    authEnabled,
     isAdmin,
     isMainTeamMember,
-    permissions, 
+    permissions,
     userTeams,
     activeTeam,
     mainTeamId,
-    loading: authLoading 
+    loading: authLoading
   } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -238,8 +238,8 @@ export default function AdminPage() {
                       <h4>Equipos:</h4>
                       <div className="teams-list">
                         {userTeams.map((team) => (
-                          <div 
-                            key={team.$id} 
+                          <div
+                            key={team.$id}
                             className={`team-card ${team.$id === mainTeamId ? "main-team" : ""} ${activeTeam?.$id === team.$id ? "active" : ""}`}
                           >
                             <div className="team-card-header">
@@ -278,7 +278,7 @@ export default function AdminPage() {
               ) : (
                 <div className="no-auth-message">
                   <p>
-                    {authEnabled 
+                    {authEnabled
                       ? "No hay usuario autenticado"
                       : "La autenticación está deshabilitada. Todos los usuarios tienen permisos completos."
                     }
@@ -432,10 +432,6 @@ export default function AdminPage() {
 
         </div>
       </main>
-
-      <footer className="explorer-footer">
-        <p>Graph DB Explorer — Panel de Administración</p>
-      </footer>
     </div>
   );
 }

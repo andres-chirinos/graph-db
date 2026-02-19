@@ -273,10 +273,6 @@ export default function EntityPage({ params }) {
           />
         </div>
       </main>
-
-      <footer className="explorer-footer">
-        <p>Graph DB Explorer</p>
-      </footer>
     </div>
   );
 }

@@ -1,8 +1,9 @@
 import Providers from "./providers";
+import Footer from "./footer";
 import "leaflet/dist/leaflet.css";
 
 export const metadata = {
-  title: "Graph DB Explorer",
+  title: "Base de Conocimiento",
   description: "Explorador de entidades",
 };
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }) {
       </head>
       <body className={"bg-[#f8f9fa] font-[Inter] text-sm text-[#202122]"}>
         <Providers>{children}</Providers>
+        <Footer />
       </body>
     </html>
   );

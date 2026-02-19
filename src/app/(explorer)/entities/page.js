@@ -13,7 +13,7 @@ const ITEMS_PER_PAGE = 25;
 export default function EntitiesListPage() {
   const router = useRouter();
   const { user, activeTeam, canCreate, loading: authLoading } = useAuth();
-  
+
   const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -155,10 +155,6 @@ export default function EntitiesListPage() {
           )}
         </div>
       </main>
-
-      <footer className="explorer-footer">
-        <p>Graph DB Explorer</p>
-      </footer>
 
       {/* Modal para crear entidad */}
       {showCreateForm && (

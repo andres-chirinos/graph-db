@@ -3,7 +3,7 @@ import "./explorer.css";
 import "@appwrite.io/pink-icons";
 
 export const metadata = {
-  title: "Graph DB Explorer",
+  title: "Base de Conocimiento",
   description: "Explorador de entidades",
 };
 
