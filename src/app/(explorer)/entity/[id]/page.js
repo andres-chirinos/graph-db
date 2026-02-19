@@ -3,14 +3,11 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState, ValueRenderer, ClaimItem } from "@/components";
+import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState, RelationshipsView } from "@/components";
 import { useAuth } from "@/context/AuthContext";
-import { 
-  getEntity, 
-  getClaim, 
-  getClaimsByValueRelation, 
-  getClaimsByProperty,
-  getReferencesByEntityRole,
+import {
+  getEntity,
+  getClaim,
   updateEntity,
   deleteEntity,
   createClaim,
@@ -29,33 +26,12 @@ export default function EntityPage({ params }) {
   const { id } = use(params);
   const router = useRouter();
   const { user, activeTeam, canEdit, canDelete, canCreate, loading: authLoading } = useAuth();
-  
+
   const [entity, setEntity] = useState(null);
   const [claims, setClaims] = useState([]);
-  const [incomingClaims, setIncomingClaims] = useState([]);
-  const [usedAsProperty, setUsedAsProperty] = useState([]);
-  const [referencedInClaims, setReferencedInClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  function normalizeValue(valueRaw, datatype = "string") {
-    if (valueRaw === null || valueRaw === undefined) return null;
-    let data = valueRaw;
-    if (typeof valueRaw === "string") {
-      try {
-        const parsed = JSON.parse(valueRaw);
-        if (parsed && typeof parsed === "object" && parsed.datatype !== undefined && parsed.data !== undefined) {
-          return { datatype: parsed.datatype || datatype, data: parsed.data };
-        }
-        if (["json", "object", "array"].includes(datatype)) {
-          data = parsed;
-        }
-      } catch {
-        data = valueRaw;
-      }
-    }
-    return { datatype, data };
-  }
 
   // Permisos de edición basados en el contexto de autenticación
   const editable = canEdit || canCreate || canDelete;
@@ -67,6 +43,8 @@ export default function EntityPage({ params }) {
   async function loadEntity() {
     setLoading(true);
     setError(null);
+    setEntity(null);
+    setClaims([]);
     try {
       const entityData = await getEntity(id, true);
       setEntity(entityData);
@@ -79,27 +57,6 @@ export default function EntityPage({ params }) {
         setClaims(claimsWithDetails);
       } else {
         setClaims([]);
-      }
-
-      // Cargar relaciones inversas (donde esta entidad es el valor)
-      const incoming = await getClaimsByValueRelation(id);
-      setIncomingClaims(incoming);
-
-      // Cargar claims donde esta entidad es usada como propiedad
-      const asProperty = await getClaimsByProperty(id);
-      setUsedAsProperty(asProperty);
-
-      // Cargar claims donde esta entidad es usada como referencia
-      const references = await getReferencesByEntityRole(id);
-      const referencedInClaimIds = references.map(ref => ref.claim?.$id).filter(Boolean);
-      const uniqueClaimIds = [...new Set(referencedInClaimIds)];
-      if (uniqueClaimIds.length > 0) {
-        const claimsFromReferences = await Promise.all(
-            uniqueClaimIds.map(claimId => getClaim(claimId))
-        );
-        setReferencedInClaims(claimsFromReferences);
-      } else {
-        setReferencedInClaims([]);
       }
 
     } catch (err) {
@@ -245,7 +202,7 @@ export default function EntityPage({ params }) {
           </nav>
 
           {/* Entity Header */}
-          <EntityHeader 
+          <EntityHeader
             entity={entity}
             editable={editable}
             onUpdate={handleUpdateEntity}
@@ -259,7 +216,7 @@ export default function EntityPage({ params }) {
               <span className="icon-list"></span>
               Declaraciones
             </h2>
-            <ClaimsList 
+            <ClaimsList
               claims={claims}
               subjectId={id}
               editable={editable}
@@ -275,133 +232,45 @@ export default function EntityPage({ params }) {
             />
           </section>
 
-          {/* Incoming Relations - Where this entity is referenced as value */}
-          {incomingClaims.length > 0 && (
-            <section className="entity-incoming">
-              <h2 className="section-title">
-                <span className="icon-arrow-left"></span>
-                Lo que enlaza aquí
-              </h2
-              ><p className="section-description">
-                Entidades que hacen referencia a esta entidad
-              </p>
-              <div className="incoming-claims-list">
-                {incomingClaims.map((claim) => (
-                  <div key={claim.$id} className="incoming-claim-item with-qualifiers">
-                    <div className="claim-main-line">
-                      <Link href={`/entity/${claim.subject?.$id}`} className="incoming-subject">
-                        {claim.subject?.label || claim.subject?.$id}
-                      </Link>
-                      <span className="incoming-property">
-                        {claim.property?.label || claim.property?.$id}
-                      </span>
-                      <span className="incoming-arrow">→</span>
-                      <span className="incoming-value-self">
-                        {entity.label || entity.$id}
-                      </span>
-                    </div>
-                    {claim.qualifiersList && claim.qualifiersList.length > 0 && (
-                      <div className="claim-qualifiers">
-                        {claim.qualifiersList.map(qualifier => {
-                          const parsedQualifierValue = normalizeValue(qualifier.value_raw, qualifier.datatype || qualifier.property?.datatype || "string");
-                          return (
-                            <div key={qualifier.$id} className="qualifier-item">
-                              <span className="qualifier-property">
-                                {qualifier.property ? (<Link href={`/entity/${qualifier.property.$id}`}>{qualifier.property.label || qualifier.property.$id}</Link>) : ("(Propiedad)")}
-                              </span>
-                              <span className="qualifier-value">
-                                {qualifier.value_relation ? (<Link href={`/entity/${qualifier.value_relation.$id}`}>{qualifier.value_relation.label || qualifier.value_relation.$id}</Link>) : parsedQualifierValue ? (<ValueRenderer value={parsedQualifierValue} compact />) : ("(Sin valor)")}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+          {/* Incoming Relations - Using new component */}
+          <RelationshipsView
+            entityId={id}
+            type="incoming"
+            title="Lo que enlaza aquí"
+            icon="icon-arrow-left"
+          />
 
-          {/* Used as Property */}
-          {usedAsProperty.length > 0 && (
-            <section className="entity-as-property">
-              <h2 className="section-title">
-                <span className="icon-tag"></span>
-                Usado como propiedad
-              </h2>
-              <p className="section-description">
-                Declaraciones que usan esta entidad como propiedad
-              </p>
-              <div className="incoming-claims-list">
-                {usedAsProperty.map((claim) => (
-                  <div key={claim.$id} className="incoming-claim-item with-qualifiers">
-                    <div className="claim-main-line">
-                      <Link href={`/entity/${claim.subject?.$id}`} className="incoming-subject">
-                        {claim.subject?.label || claim.subject?.$id}
-                      </Link>
-                      <span className="incoming-property-self">
-                        {entity.label || entity.$id}
-                      </span>
-                      <span className="incoming-arrow">→</span>
-                      {claim.value_relation ? (
-                        <Link href={`/entity/${claim.value_relation.$id}`} className="incoming-value">
-                          {claim.value_relation.label || claim.value_relation.$id}
-                        </Link>
-                      ) : (
-                        <span className="incoming-value-raw">
-                          {claim.value_raw !== null && claim.value_raw !== undefined ? (
-                            <ValueRenderer value={normalizeValue(claim.value_raw, claim.datatype || claim.property?.datatype || "string")} compact />
-                          ) : (
-                            "(valor)"
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    {claim.qualifiersList && claim.qualifiersList.length > 0 && (
-                      <div className="claim-qualifiers">
-                        {claim.qualifiersList.map(qualifier => {
-                          const parsedQualifierValue = normalizeValue(qualifier.value_raw, qualifier.datatype || qualifier.property?.datatype || "string");
-                          return (
-                            <div key={qualifier.$id} className="qualifier-item">
-                              <span className="qualifier-property">
-                                {qualifier.property ? (<Link href={`/entity/${qualifier.property.$id}`}>{qualifier.property.label || qualifier.property.$id}</Link>) : ("(Propiedad)")}
-                              </span>
-                              <span className="qualifier-value">
-                                {qualifier.value_relation ? (<Link href={`/entity/${qualifier.value_relation.$id}`}>{qualifier.value_relation.label || qualifier.value_relation.$id}</Link>) : parsedQualifierValue ? (<ValueRenderer value={parsedQualifierValue} compact />) : ("(Sin valor)")}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+          {/* Used as Property - Using new component */}
+          <RelationshipsView
+            entityId={id}
+            type="property"
+            title="Usado como propiedad"
+            icon="icon-tag"
+          />
 
-          {/* Referenced In - Where this entity is used as a reference */}
-          {referencedInClaims.length > 0 && (
-            <section className="entity-referenced-in">
-              <h2 className="section-title">
-                <span className="icon-book"></span>
-                Citado en
-              </h2>
-              <p className="section-description">
-                Declaraciones que citan a esta entidad como fuente/referencia
-              </p>
-              <div className="claims-list">
-                {referencedInClaims.map((claim) => (
-                  <ClaimItem
-                    key={claim.$id}
-                    claim={claim}
-                    editable={false}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+          {/* Used as Property in Qualifiers */}
+          <RelationshipsView
+            entityId={id}
+            type="qualifier_property"
+            title="Usado como propiedad (Calificador)"
+            icon="icon-tag"
+          />
+
+          {/* Used as Value in Qualifiers */}
+          <RelationshipsView
+            entityId={id}
+            type="qualifier_value"
+            title="Usado como valor (Calificador)"
+            icon="icon-link"
+          />
+
+          {/* Referenced In - Using new component */}
+          <RelationshipsView
+            entityId={id}
+            type="references"
+            title="Citado en"
+            icon="icon-book"
+          />
         </div>
       </main>
 

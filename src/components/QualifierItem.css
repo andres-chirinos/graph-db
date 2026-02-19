@@ -1,0 +1,54 @@
+/* QualifierItem.css */
+.qualifier-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--text-primary, #334155);
+}
+
+.qualifier-property {
+    font-weight: 600;
+    color: var(--text-secondary, #475569);
+}
+
+.qualifier-property::after {
+    content: ":";
+    margin-left: 1px;
+}
+
+.qualifier-value {
+    color: var(--text-primary, #1e293b);
+}
+
+.qualifier-actions {
+    margin-left: auto;
+    opacity: 0;
+    transition: opacity 0.2s;
+    display: flex;
+    gap: 0.25rem;
+}
+
+.qualifier-item:hover .qualifier-actions {
+    opacity: 1;
+}
+
+.btn-icon-sm {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    color: var(--text-secondary, #94a3b8);
+    transition: all 0.15s;
+}
+
+.btn-icon-sm:hover {
+    background-color: var(--bg-hover, #f1f5f9);
+    color: var(--primary-color, #3b82f6);
+}
+
+.btn-delete:hover {
+    color: var(--danger-color, #ef4444);
+}

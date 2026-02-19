@@ -1,0 +1,144 @@
+/* RelationshipItem.css */
+.relationship-item {
+    background-color: var(--bg-card-secondary, #f8fafc);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 6px;
+    padding: 1rem;
+    transition: background-color 0.2s;
+}
+
+.relationship-item:hover {
+    background-color: var(--bg-hover, #f1f5f9);
+}
+
+.relationship-main {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.relationship-part {
+    flex: 1;
+    min-width: 0;
+    /* Prevent overflow */
+}
+
+.relationship-part.subject {
+    text-align: right;
+    font-weight: 500;
+}
+
+.relationship-part.value {
+    text-align: left;
+    font-weight: 500;
+}
+
+.relationship-connector {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-tertiary, #94a3b8);
+    font-size: 0.875rem;
+    flex-shrink: 0;
+}
+
+.property-badge {
+    background-color: var(--bg-badge, #e0f2fe);
+    color: var(--text-badge, #0369a1);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.arrow {
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.entity-link {
+    color: var(--primary-color, #2563eb);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.entity-link:hover {
+    text-decoration: underline;
+    color: var(--primary-dark, #1d4ed8);
+}
+
+.entity-link.current {
+    color: var(--text-primary, #0f172a);
+    font-weight: 700;
+    cursor: default;
+    text-decoration: none;
+}
+
+.entity-unknown,
+.property-unknown,
+.value-empty {
+    color: var(--text-muted, #cbd5e1);
+    font-style: italic;
+}
+
+.relationship-details {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-light, #f1f5f9);
+    padding-left: 1rem;
+}
+
+.relationship-detail-section {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.relationship-detail-section:last-child {
+    margin-bottom: 0;
+}
+
+.detail-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #64748b);
+    font-weight: 600;
+    width: 80px;
+    flex-shrink: 0;
+    padding-top: 0.25rem;
+}
+
+.detail-list {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+@media (max-width: 640px) {
+    .relationship-main {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+    }
+
+    .relationship-part.subject,
+    .relationship-part.value {
+        text-align: center;
+    }
+
+    .relationship-connector {
+        justify-content: center;
+        transform: rotate(90deg);
+        margin: 0.5rem 0;
+    }
+
+    .relationship-connector .arrow {
+        display: none;
+        /* Hide arrows in vertical mode if they look weird, or replace with down arrows */
+    }
+}

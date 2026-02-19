@@ -11,6 +11,8 @@ export { default as AuthModal } from "./AuthModal";
 export { default as UserMenu } from "./UserMenu";
 export { default as PermissionsModal } from "./PermissionsModal";
 export { LoadingState, ErrorState, EmptyState } from "./States";
+export { default as RelationshipItem } from "./RelationshipItem";
+export { default as RelationshipsView } from "./RelationshipsView";
 
 // Componentes de edición
 export { default as EditModal, ConfirmModal } from "./EditModal";
@@ -20,3 +22,4 @@ export { default as QualifierForm } from "./QualifierForm";
 export { default as ReferenceForm } from "./ReferenceForm";
 export { default as EntitySelector } from "./EntitySelector";
 export { default as ValueInput } from "./ValueInput";
+

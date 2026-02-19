@@ -1,0 +1,62 @@
+/* ReferenceItem.css */
+.reference-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    padding: 0.25rem 0;
+}
+
+.reference-entity {
+    font-weight: 500;
+    color: var(--primary-color, #2563eb);
+    text-decoration: none;
+}
+
+.reference-entity:hover {
+    text-decoration: underline;
+}
+
+.reference-details {
+    color: var(--text-secondary, #64748b);
+    display: inline-block;
+}
+
+.reference-details::before {
+    content: "—";
+    margin-right: 0.5rem;
+    color: var(--border-color, #cbd5e1);
+}
+
+.reference-actions {
+    margin-left: auto;
+    opacity: 0;
+    transition: opacity 0.2s;
+    display: flex;
+    gap: 0.25rem;
+}
+
+.reference-item:hover .reference-actions {
+    opacity: 1;
+}
+
+/* Reusing btn-icon-sm from QualifierItem logic, or duplicate styles here */
+.btn-icon-sm {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    color: var(--text-secondary, #94a3b8);
+    transition: all 0.15s;
+}
+
+.btn-icon-sm:hover {
+    background-color: var(--bg-hover, #f1f5f9);
+    color: var(--primary-color, #3b82f6);
+}
+
+.btn-delete:hover {
+    color: var(--danger-color, #ef4444);
+}
