@@ -60,8 +60,8 @@ function calculateRelevance(entity, term) {
 export async function searchEntities(searchTerm, limit = 20, offset = 0) {
   const term = normalizeText(searchTerm);
   const queries = [
-    Query.limit(searchTerm ? 100 : limit),
-    Query.offset(searchTerm ? 0 : offset),
+    Query.limit(limit),
+    Query.offset(offset),
   ];
 
   if (searchTerm) {

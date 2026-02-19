@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { SearchBar, EntityCard, LoadingState, EmptyState, ErrorState } from "@/components";
-import { listEntities, searchEntities } from "@/lib/database";
+import { useRouter } from "next/navigation";
+import { EntitySelector, EntityCard, LoadingState, EmptyState, ErrorState } from "@/components";
+import { listEntities } from "@/lib/database";
 import "@/components/Stats.css";
 import "./home.css";
 
@@ -11,8 +12,7 @@ export default function HomePage() {
   const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [searchResults, setSearchResults] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const router = useRouter();
 
   useEffect(() => {
     loadRecentEntities();
@@ -31,28 +31,38 @@ export default function HomePage() {
     }
   }
 
-  async function handleSearch(query) {
-    setSearchQuery(query);
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await searchEntities(query, 20);
-      setSearchResults(result.rows);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setLoading(false);
+  function handleEntitySelect(entityId) {
+    if (entityId) {
+      router.push(`/entity/${entityId}`);
     }
   }
 
-  function clearSearch() {
-    setSearchQuery("");
-    setSearchResults(null);
-    loadRecentEntities();
+  function handleAdvancedSearch() {
+    router.push(`/search?mode=advanced`);
   }
 
-  const displayEntities = searchResults || entities;
-  const isSearching = searchResults !== null;
+  function handleViewAll() {
+    router.push(`/search`);
+  }
+
+  const dropdownFooter = (
+    <div className="nav-search-actions">
+      <button
+        type="button"
+        className="nav-search-action"
+        onClick={handleAdvancedSearch}
+      >
+        Búsqueda avanzada
+      </button>
+      <button
+        type="button"
+        className="nav-search-action"
+        onClick={handleViewAll}
+      >
+        Ver todos los resultados
+      </button>
+    </div>
+  );
 
   return (
     <div className="explorer-layout">
@@ -65,52 +75,40 @@ export default function HomePage() {
               Base de conocimiento
             </p>
 
-            <SearchBar
-              onSearch={handleSearch}
-              placeholder="Buscar entidades, propiedades, conceptos..."
-            />
-
-            {isSearching && (
-              <div className="search-status">
-                <span>Resultados para: <strong>{searchQuery}</strong></span>
-                <button onClick={clearSearch} className="clear-search">
-                  <span className="icon-x"></span>
-                  Limpiar
-                </button>
-              </div>
-            )}
+            <div className="hero-search-wrapper">
+              <EntitySelector
+                placeholder="Buscar entidades, propiedades, conceptos..."
+                onChange={handleEntitySelect}
+                dropdownFooter={dropdownFooter}
+                value={null}
+              />
+            </div>
           </section>
 
           {/* Entities Section */}
           <section className="entities-section">
             <div className="section-header">
               <h2 className="section-title">
-                {isSearching ? "Resultados de búsqueda" : "Entidades recientes"}
+                Entidades recientes
               </h2>
-              {!isSearching && (
-                <Link href="/entities" className="view-all-link">
-                  Ver todas <span className="icon-arrow-right"></span>
-                </Link>
-              )}
+              <Link href="/entities" className="view-all-link">
+                Ver todas <span className="icon-arrow-right"></span>
+              </Link>
             </div>
 
             {loading ? (
               <LoadingState message="Cargando entidades..." />
             ) : error ? (
               <ErrorState error={error} onRetry={loadRecentEntities} />
-            ) : displayEntities.length === 0 ? (
+            ) : entities.length === 0 ? (
               <EmptyState
-                title={isSearching ? "Sin resultados" : "Sin entidades"}
-                message={
-                  isSearching
-                    ? "No se encontraron entidades que coincidan con tu búsqueda"
-                    : "No hay entidades en la base de datos todavía"
-                }
-                icon={isSearching ? "search" : "database"}
+                title="Sin entidades"
+                message="No hay entidades en la base de datos todavía"
+                icon="database"
               />
             ) : (
               <div className="entities-grid">
-                {displayEntities.map((entity) => (
+                {entities.map((entity) => (
                   <EntityCard key={entity.$id} entity={entity} />
                 ))}
               </div>

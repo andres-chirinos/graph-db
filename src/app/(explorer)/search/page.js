@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { SearchBar, EntityCard, LoadingState, EmptyState, ErrorState, EntitySelector } from "@/components";
-import { searchEntities, searchEntitiesAdvanced } from "@/lib/database";
+import { searchEntities, searchEntitiesBySchema } from "@/lib/database";
 import "./style.css";
 
 export default function SearchPage() {
@@ -28,8 +28,12 @@ function SearchContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchSummary, setSearchSummary] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Advanced Search State
   const [advancedText, setAdvancedText] = useState("");
+  const [logic, setLogic] = useState("AND");
   const [advancedConditions, setAdvancedConditions] = useState([]);
+
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -95,21 +99,22 @@ function SearchContent() {
         matchMode: condition.matchMode || "contains",
       }));
 
+    const schema = {
+      text: advancedText,
+      properties,
+      logic,
+    };
+
     const summaryParts = [];
     if (advancedText?.trim()) summaryParts.push(`texto: "${advancedText.trim()}"`);
     if (properties.length > 0) {
-      summaryParts.push(`${properties.length} condición${properties.length !== 1 ? "es" : ""}`);
+      summaryParts.push(`${properties.length} condición${properties.length !== 1 ? "es" : ""} (${logic})`);
     }
     setSearchSummary(summaryParts.length > 0 ? summaryParts.join(" · ") : "Búsqueda avanzada");
 
     try {
-      const result = await searchEntitiesAdvanced(
-        {
-          text: advancedText,
-          properties,
-        },
-        50
-      );
+      // Use the schema search directly
+      const result = await searchEntitiesBySchema(schema, 50);
       setResults(result || []);
     } catch (err) {
       setError(err);
@@ -123,7 +128,7 @@ function SearchContent() {
       <header className="page-header">
         <h1 className="page-title">Búsqueda Avanzada</h1>
         <p className="page-subtitle">
-          Busca entidades por etiqueta, descripción o alias
+          Busca entidades por etiqueta, descripción, alias o propiedades específicas
         </p>
       </header>
 
@@ -147,7 +152,8 @@ function SearchContent() {
 
       {showAdvanced && (
         <section className="advanced-section">
-          <h2 className="section-title">Búsqueda avanzada</h2>
+          <h2 className="section-title">Configuración de búsqueda</h2>
+
           <div className="advanced-grid">
             <div className="form-group">
               <label>Texto (label, descripción o alias)</label>
@@ -156,16 +162,38 @@ function SearchContent() {
                 value={advancedText}
                 onChange={(e) => setAdvancedText(e.target.value)}
                 placeholder="Ej: Municipalidad"
+                className="form-input"
               />
             </div>
           </div>
 
           <div className="advanced-conditions">
             <div className="conditions-header">
-              <h3>Condiciones (AND)</h3>
+              <div className="conditions-title-group">
+                <h3>Condiciones por Propiedad</h3>
+                <div className="logic-toggle">
+                  <span className="logic-label">Lógica:</span>
+                  <div className="btn-group">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${logic === "AND" ? "btn-primary" : "btn-outline"}`}
+                      onClick={() => setLogic("AND")}
+                    >
+                      AND (Todas)
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${logic === "OR" ? "btn-primary" : "btn-outline"}`}
+                      onClick={() => setLogic("OR")}
+                    >
+                      OR (Alguna)
+                    </button>
+                  </div>
+                </div>
+              </div>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-secondary btn-sm"
                 onClick={addAdvancedCondition}
               >
                 + Añadir condición
@@ -174,40 +202,47 @@ function SearchContent() {
 
             {advancedConditions.length === 0 ? (
               <div className="conditions-empty">
-                Agrega condiciones para filtrar por propiedades.
+                Agrega condiciones para filtrar por propiedades específicas.
               </div>
             ) : (
               <div className="conditions-list">
                 {advancedConditions.map((condition, index) => (
                   <div key={condition.id} className="condition-row">
-                    {index > 0 && <span className="condition-pill">AND</span>}
-                    <div className="condition-field">
+                    {index > 0 && (
+                      <span className={`condition-pill ${logic.toLowerCase()}`}>
+                        {logic}
+                      </span>
+                    )}
+                    <div className="condition-field property-field">
                       <label>Propiedad</label>
                       <EntitySelector
                         value={condition.propertyId}
                         onChange={(value) => updateAdvancedCondition(condition.id, { propertyId: value })}
                         placeholder="Buscar propiedad..."
+                        className="condition-selector"
                       />
                     </div>
-                    <div className="condition-field">
+                    <div className="condition-field operator-field">
+                      <label>Operador</label>
+                      <select
+                        value={condition.matchMode || "contains"}
+                        onChange={(e) => updateAdvancedCondition(condition.id, { matchMode: e.target.value })}
+                        className="form-select"
+                      >
+                        <option value="contains">Contiene</option>
+                        <option value="equal">Igual</option>
+                      </select>
+                    </div>
+                    <div className="condition-field value-field">
                       <label>Valor</label>
                       <input
                         type="text"
                         value={condition.value}
                         onChange={(e) => updateAdvancedCondition(condition.id, { value: e.target.value })}
-                        placeholder="Ej: 2026"
+                        placeholder="Valor a buscar"
                         disabled={!condition.propertyId}
+                        className="form-input"
                       />
-                    </div>
-                    <div className="condition-field">
-                      <label>Operador</label>
-                      <select
-                        value={condition.matchMode || "contains"}
-                        onChange={(e) => updateAdvancedCondition(condition.id, { matchMode: e.target.value })}
-                      >
-                        <option value="contains">Contiene</option>
-                        <option value="equal">Igual</option>
-                      </select>
                     </div>
                     <button
                       type="button"
@@ -222,6 +257,7 @@ function SearchContent() {
               </div>
             )}
           </div>
+
           <div className="advanced-actions">
             <button
               type="button"
@@ -229,7 +265,7 @@ function SearchContent() {
               onClick={handleAdvancedSearch}
               disabled={loading}
             >
-              Buscar avanzada
+              {loading ? "Buscando..." : "Ejecutar Búsqueda Avanzada"}
             </button>
           </div>
         </section>

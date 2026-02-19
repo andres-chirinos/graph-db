@@ -20,6 +20,12 @@
     margin-bottom: var(--spacing-xl, 2rem);
 }
 
+.hero-search-wrapper {
+    max-width: 600px;
+    margin: 0 auto;
+    text-align: left;
+}
+
 /* ============================================
    SECTIONS
    ============================================ */

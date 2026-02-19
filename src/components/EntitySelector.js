@@ -21,6 +21,8 @@ export default function EntitySelector({
   required = false,
   disabled = false,
   excludeIds = [],
+  className = "",
+  dropdownFooter = null,
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [results, setResults] = useState([]);
@@ -127,20 +129,15 @@ export default function EntitySelector({
     if (trimmed.length < 2) return { rows: [], total: 0 };
     const offset = nextPage * pageSize;
 
-    const primary = await searchEntities(trimmed, pageSize, offset);
-    const rowsPrimary = primary?.rows || [];
-    let rows = rowsPrimary;
-    let totalCount = primary?.total || rowsPrimary.length || 0;
+    // Use searchEntities directly as it handles sorting by relevance and pagination
+    const result = await searchEntities(trimmed, pageSize, offset);
 
-    const lower = trimmed.toLowerCase();
-    if (lower !== trimmed) {
-      const secondary = await searchEntities(lower, pageSize, offset);
-      const rowsSecondary = secondary?.rows || [];
-      rows = mergeUniqueEntities(rows, rowsSecondary);
-      totalCount = Math.max(totalCount, secondary?.total || rowsSecondary.length || 0);
-    }
+    console.debug(result);
 
-    return { rows, total: totalCount };
+    return {
+      rows: result?.rows || [],
+      total: result?.total || 0
+    };
   }
 
   async function trySearchById(term) {
@@ -180,24 +177,19 @@ export default function EntitySelector({
       try {
         const result = await searchEntitiesPage(trimmed, 0);
         if (!isMounted.current || cancelled) return;
-        const rows = result?.rows || [];
+
+        const rows = result.rows;
+        const totalCount = result.total;
+
         const excludeSet = new Set(excludeIdsKey.split(",").filter(Boolean));
         let filtered = rows.filter((entity) => !excludeSet.has(entity.$id));
 
-        const idMatch = await trySearchById(trimmed);
-        if (idMatch && !excludeSet.has(idMatch.$id)) {
-          filtered = mergeUniqueEntities([idMatch], filtered);
-        }
-
-        filtered = filtered
-          .map((entity) => ({ entity, score: rankEntity(entity, trimmed) }))
-          .sort((a, b) => b.score - a.score)
-          .map((item) => item.entity);
+        // Note: ranking is done by backend now in searchEntities
 
         setResults(filtered);
         setPage(0);
-        setTotal(result?.total || filtered.length);
-        setHasMore((pageSize * 1) < (result?.total || filtered.length));
+        setTotal(totalCount);
+        setHasMore(totalCount > pageSize); // Basic check, better logic might be needed
       } catch (e) {
         console.error("Error searching entities:", e);
         if (isMounted.current && !cancelled) {
@@ -221,36 +213,43 @@ export default function EntitySelector({
     };
   }, [searchTerm, excludeIdsKey]);
 
-  const loadMore = useCallback(async () => {
+  const changePage = useCallback(async (newPage) => {
     const trimmed = searchTerm.trim();
     if (trimmed.length < 2) return;
-    const nextPage = page + 1;
+
     setLoading(true);
     try {
-      const result = await searchEntitiesPage(trimmed, nextPage);
-      const rows = result?.rows || [];
+      const result = await searchEntitiesPage(trimmed, newPage);
+      const rows = result.rows;
+      const totalCount = result.total;
+
       const excludeSet = new Set(excludeIdsKey.split(",").filter(Boolean));
       let filtered = rows.filter((entity) => !excludeSet.has(entity.$id));
 
-      const merged = mergeUniqueEntities(results, filtered)
-        .map((entity) => ({ entity, score: rankEntity(entity, trimmed) }))
-        .sort((a, b) => b.score - a.score)
-        .map((item) => item.entity);
+      // Note: ranking is done by backend now in searchEntities
 
-      setResults(merged);
-      setPage(nextPage);
-      setTotal(result?.total || merged.length);
-      setHasMore((pageSize * (nextPage + 1)) < (result?.total || merged.length));
+      setResults(filtered);
+      setPage(newPage);
+      setTotal(totalCount);
+      setHasMore(totalCount > (newPage + 1) * pageSize);
     } catch (e) {
-      console.error("Error loading more entities:", e);
+      console.error("Error changing page:", e);
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, page, excludeIdsKey, results]);
+  }, [searchTerm, excludeIdsKey]);
 
   function handleSelect(entity) {
-    setSelectedEntity(entity);
+    // If onChange is used for navigation, it might not need to set selectedEntity
+    // We check if the parent component clears the value (e.g. Navigation) by passing null/undefined
+    // In that case, we keep the component in "search mode" but call onChange
+
     onChange(entity.$id);
+
+    // Only set selected state if value is being managed (not pure navigation)
+    // Actually, setting selectedEntity locally is fine, if the parent resets `value` prop to null, 
+    // the useEffect[value] loop will handle clearing it.
+    // However, for pure navigation, we might want to close the dropdown immediately.
     setIsOpen(false);
     setSearchTerm("");
   }
@@ -262,7 +261,7 @@ export default function EntitySelector({
   }
 
   return (
-    <div className="entity-selector" ref={containerRef}>
+    <div className={`entity-selector ${className}`} ref={containerRef}>
       {label && (
         <label className="form-label">
           {label}
@@ -340,16 +339,24 @@ export default function EntitySelector({
                     ))}
                   </ul>
                   <div className="entity-search-pagination">
-                    <span>
-                      {Math.min(results.length, total)} de {total}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => changePage(page - 1)}
+                      disabled={page === 0 || loading}
+                    >
+                      Anterior
+                    </button>
+                    <span className="pagination-info">
+                      {page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} de {total}
                     </span>
                     <button
                       type="button"
-                      className="btn btn-secondary"
-                      onClick={loadMore}
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => changePage(page + 1)}
                       disabled={!hasMore || loading}
                     >
-                      {loading ? "Cargando..." : "Cargar más"}
+                      Siguiente
                     </button>
                   </div>
                 </>
@@ -358,6 +365,13 @@ export default function EntitySelector({
                   No se encontraron entidades
                 </div>
               ) : null}
+
+              {/* Render Footer if exists (even if no results, or searching) */}
+              {dropdownFooter && (
+                <div className="entity-search-footer">
+                  {dropdownFooter}
+                </div>
+              )}
             </div>
           )}
         </div>
