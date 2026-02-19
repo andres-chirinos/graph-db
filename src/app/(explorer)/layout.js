@@ -1,6 +1,7 @@
 import "../app.css";
 import "./explorer.css";
 import "@appwrite.io/pink-icons";
+import { Navigation, Footer } from "@/components";
 
 export const metadata = {
   title: "Base de Conocimiento",
@@ -8,5 +9,11 @@ export const metadata = {
 };
 
 export default function ExplorerLayout({ children }) {
-  return children;
+  return (
+    <>
+      <Navigation />
+      {children}
+      <Footer />
+    </>
+  );
 }

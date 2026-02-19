@@ -23,3 +23,4 @@ export { default as ReferenceForm } from "./ReferenceForm";
 export { default as EntitySelector } from "./EntitySelector";
 export { default as ValueInput } from "./ValueInput";
 
+export { default as Footer } from "./Footer";

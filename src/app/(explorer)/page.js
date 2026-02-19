@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Navigation, SearchBar, EntityCard, LoadingState, EmptyState, ErrorState } from "@/components";
+import { SearchBar, EntityCard, LoadingState, EmptyState, ErrorState } from "@/components";
 import { listEntities, searchEntities } from "@/lib/database";
 
 export default function HomePage() {
@@ -54,8 +54,6 @@ export default function HomePage() {
 
   return (
     <div className="explorer-layout">
-      <Navigation />
-
       <main className="explorer-main">
         <div className="explorer-container">
           {/* Hero Section */}

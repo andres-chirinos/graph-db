@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Navigation, LoadingState } from "@/components";
+import { LoadingState } from "@/components";
 import { acceptTeamInvite } from "@/lib/auth";
 import { useAuth } from "@/context/AuthContext";
 import "./style.css";
@@ -10,7 +10,6 @@ import "./style.css";
 export default function AcceptTeamInvitePage() {
   return (
     <div className="explorer-layout">
-      <Navigation />
       <main className="explorer-main">
         <div className="explorer-container">
           <Suspense fallback={<LoadingState message="Cargando invitación..." />}>

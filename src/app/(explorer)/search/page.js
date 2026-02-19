@@ -2,15 +2,13 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Navigation, SearchBar, EntityCard, LoadingState, EmptyState, ErrorState, EntitySelector } from "@/components";
+import { SearchBar, EntityCard, LoadingState, EmptyState, ErrorState, EntitySelector } from "@/components";
 import { searchEntities, searchEntitiesAdvanced } from "@/lib/database";
 import "./style.css";
 
 export default function SearchPage() {
   return (
     <div className="explorer-layout">
-      <Navigation />
-
       <main className="explorer-main">
         <div className="explorer-container">
           <Suspense fallback={<LoadingState message="Cargando búsqueda..." />}>

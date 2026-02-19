@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Navigation } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import {
   updateUserName,
@@ -376,8 +375,6 @@ export default function AccountPage() {
 
   return (
     <div className="explorer-layout">
-      <Navigation />
-
       <main className="explorer-main">
         <div className="explorer-container account-page">
           {!authEnabled && (

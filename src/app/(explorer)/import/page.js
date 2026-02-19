@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 
-import { EntitySelector, Navigation, ClaimForm, QualifierForm, ReferenceForm } from "@/components";
+import { EntitySelector, ClaimForm, QualifierForm, ReferenceForm } from "@/components";
 
 import * as XLSX from "xlsx";
 
@@ -794,8 +794,6 @@ export default function ImportPage() {
 
     return (
         <div className="explorer-layout">
-            <Navigation />
-
             <main className="explorer-main">
                 <div className="explorer-container import-page">
                     <header className="page-header">

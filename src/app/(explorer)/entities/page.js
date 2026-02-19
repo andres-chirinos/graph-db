@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Navigation, EntityCard, LoadingState, ErrorState, EmptyState } from "@/components";
+import { EntityCard, LoadingState, ErrorState, EmptyState } from "@/components";
 import { listEntities, createEntity } from "@/lib/database";
 import { useAuth } from "@/context/AuthContext";
 import EntityForm from "@/components/EntityForm";
@@ -63,7 +63,6 @@ export default function EntitiesListPage() {
   if (authLoading) {
     return (
       <div className="explorer-layout">
-        <Navigation />
         <main className="explorer-main">
           <div className="explorer-container">
             <LoadingState message="Cargando..." />
@@ -75,8 +74,6 @@ export default function EntitiesListPage() {
 
   return (
     <div className="explorer-layout">
-      <Navigation />
-
       <main className="explorer-main">
         <div className="explorer-container">
           <header className="page-header">

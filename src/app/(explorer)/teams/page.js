@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Navigation, LoadingState } from "@/components";
+import { LoadingState } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import {
   createTeam,
@@ -33,11 +33,11 @@ export default function TeamsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  
+
   // Estados para crear team
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
-  
+
   // Estados para ver miembros
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
@@ -46,7 +46,7 @@ export default function TeamsPage() {
   // Estados para invitaciones pendientes
   const [pendingInvites, setPendingInvites] = useState([]);
   const [loadingInvites, setLoadingInvites] = useState(false);
-  
+
   // Estados para invitar
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -239,7 +239,6 @@ export default function TeamsPage() {
   if (authLoading) {
     return (
       <div className="explorer-layout">
-        <Navigation />
         <main className="explorer-main">
           <div className="explorer-container">
             <LoadingState message="Cargando..." />
@@ -252,7 +251,6 @@ export default function TeamsPage() {
   if (!authEnabled) {
     return (
       <div className="explorer-layout">
-        <Navigation />
         <main className="explorer-main">
           <div className="explorer-container">
             <div className="empty-state">
@@ -266,7 +264,6 @@ export default function TeamsPage() {
 
   return (
     <div className="explorer-layout">
-      <Navigation />
       <main className="explorer-main">
         <div className="explorer-container">
           <div className="page-header">

@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Navigation, EntityHeader, ClaimsList, LoadingState, ErrorState, RelationshipsView } from "@/components";
+import { EntityHeader, ClaimsList, LoadingState, ErrorState, RelationshipsView } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import {
   getEntity,
@@ -139,7 +139,6 @@ export default function EntityPage({ params }) {
   if (loading || authLoading) {
     return (
       <div className="explorer-layout">
-        <Navigation />
         <main className="explorer-main">
           <div className="explorer-container">
             <LoadingState message="Cargando entidad..." />
@@ -152,7 +151,6 @@ export default function EntityPage({ params }) {
   if (error) {
     return (
       <div className="explorer-layout">
-        <Navigation />
         <main className="explorer-main">
           <div className="explorer-container">
             <ErrorState
@@ -169,7 +167,6 @@ export default function EntityPage({ params }) {
   if (!entity) {
     return (
       <div className="explorer-layout">
-        <Navigation />
         <main className="explorer-main">
           <div className="explorer-container">
             <ErrorState
@@ -188,8 +185,6 @@ export default function EntityPage({ params }) {
 
   return (
     <div className="explorer-layout">
-      <Navigation />
-
       <main className="explorer-main">
         <div className="explorer-container entity-page">
           {/* Breadcrumb */}

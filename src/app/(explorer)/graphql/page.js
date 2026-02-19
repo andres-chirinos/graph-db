@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Navigation } from "@/components";
 import "./style.css";
 
 // Database ID para los ejemplos
@@ -577,8 +576,6 @@ export default function GraphQLPage() {
 
   return (
     <div className="explorer-layout">
-      <Navigation />
-
       <main className="explorer-main">
         <div className="explorer-container graphql-page">
           <header className="wdqs-header">

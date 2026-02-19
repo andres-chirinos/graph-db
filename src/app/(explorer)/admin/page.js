@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Navigation, LoadingState } from "@/components";
+import { LoadingState } from "@/components";
 import { useAuth } from "@/context/AuthContext";
 import {
   listTransactions,
@@ -138,7 +138,6 @@ export default function AdminPage() {
   if (authLoading) {
     return (
       <div className="explorer-layout">
-        <Navigation />
         <main className="explorer-main">
           <div className="explorer-container">
             <LoadingState message="Cargando..." />
@@ -155,8 +154,6 @@ export default function AdminPage() {
 
   return (
     <div className="explorer-layout">
-      <Navigation />
-
       <main className="explorer-main">
         <div className="explorer-container">
           <header className="page-header">
