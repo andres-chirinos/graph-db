@@ -26,22 +26,54 @@ export async function getEntity(entityId, includeRelations = true) {
   return result;
 }
 
+// Helper to calculate relevance score
+function calculateRelevance(entity, term) {
+  const normTerm = normalizeText(term);
+  const normLabel = normalizeText(entity.label);
+  const normDesc = normalizeText(entity.description);
+  const normAliases = (entity.aliases || []).map(a => normalizeText(a));
+  const normId = normalizeText(entity.$id);
+
+  let score = 0;
+
+  // Exact matches (Highest priority)
+  if (normLabel === normTerm) score += 100;
+  if (normAliases.includes(normTerm)) score += 90;
+  if (normId === normTerm) score += 80;
+
+  // Starts with (High priority)
+  if (normLabel.startsWith(normTerm)) score += 60;
+  if (normAliases.some(a => a.startsWith(normTerm))) score += 50;
+
+  // Contains (Medium priority)
+  if (normLabel.includes(normTerm)) score += 40;
+  if (normAliases.some(a => a.includes(normTerm))) score += 30;
+  if (normDesc.includes(normTerm)) score += 20;
+  if (normId.includes(normTerm)) score += 10;
+
+  return score;
+}
+
 /**
  * Busca entidades por texto (label, description, aliases)
  */
 export async function searchEntities(searchTerm, limit = 20, offset = 0) {
+  const term = normalizeText(searchTerm);
   const queries = [
-    Query.limit(limit),
-    Query.offset(offset),
-    Query.orderDesc("$createdAt"),
+    Query.limit(searchTerm ? 100 : limit),
+    Query.offset(searchTerm ? 0 : offset),
   ];
 
   if (searchTerm) {
     queries.push(Query.or([
-      Query.search("label", searchTerm), // Using search for full-text search capabilities if indexed
-      Query.search("description", searchTerm),
-      Query.search("aliases", searchTerm),
+      Query.search("label", term),
+      Query.search("description", term),
+      Query.contains("aliases", term),
+      Query.contains("label", term),
+      Query.equal("$id", term),
     ]));
+  } else {
+    queries.push(Query.orderDesc("$createdAt"));
   }
 
   const result = await tablesDB.listRows({
@@ -49,6 +81,14 @@ export async function searchEntities(searchTerm, limit = 20, offset = 0) {
     tableId: TABLES.ENTITIES,
     queries,
   });
+
+  if (searchTerm && result.rows.length > 0) {
+    result.rows.sort((a, b) => {
+      const scoreA = calculateRelevance(a, searchTerm);
+      const scoreB = calculateRelevance(b, searchTerm);
+      return scoreB - scoreA;
+    });
+  }
 
   return result;
 }
@@ -312,7 +352,7 @@ export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
 
   // If no conditions were specified, return empty or all entities (decided to return empty for now)
   if (!firstConditionProcessed) {
-      return [];
+    return [];
   }
 
   const finalEntityIds = Array.from(candidateEntityIds).slice(offset, offset + limit);
@@ -361,8 +401,8 @@ export async function checkEntitySchemaCompliance(entityId, schema) {
     const normalizedSearchTerm = normalizeText(text);
 
     const textMatch = normalizedEntityLabel.includes(normalizedSearchTerm) ||
-                      normalizedEntityDescription.includes(normalizedSearchTerm) ||
-                      normalizedEntityAliases.some(alias => alias.includes(normalizedSearchTerm));
+      normalizedEntityDescription.includes(normalizedSearchTerm) ||
+      normalizedEntityAliases.some(alias => alias.includes(normalizedSearchTerm));
     complianceResults.push(textMatch);
   }
 
@@ -399,11 +439,11 @@ export async function checkEntitySchemaCompliance(entityId, schema) {
         // getClaim already expands these, but the claims in entity.claims might not be fully expanded
         // So, we need to fetch them if the claimCondition has nested rules
         if ((Array.isArray(claimCondition.qualifiers) && claimCondition.qualifiers.length > 0) ||
-            (Array.isArray(claimCondition.references) && claimCondition.references.length > 0)) {
+          (Array.isArray(claimCondition.references) && claimCondition.references.length > 0)) {
           // If there are nested conditions, we must fetch the full claim details
           const fetchedClaim = await getClaim(claim.$id);
           if (fetchedClaim) {
-              fullClaimWithRelations = fetchedClaim;
+            fullClaimWithRelations = fetchedClaim;
           }
         }
         if (_claimMatchesSchemaCondition(fullClaimWithRelations, claimCondition)) {

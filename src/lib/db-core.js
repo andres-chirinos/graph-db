@@ -61,7 +61,10 @@ export function stripSystemFields(row) {
 export const normalizeText = (value) =>
   String(value ?? "")
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
+    .replace(/[^a-z0-9\s]/g, "") // remove special characters/symbols
     .replace(/\s+/g, " ");
 
 /**

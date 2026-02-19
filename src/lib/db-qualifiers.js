@@ -1,5 +1,5 @@
 import { tablesDB, Query } from "./appwrite";
-import { DATABASE_ID, TABLES, generatePermissions, normalizeText, stringifyClaimValue, ClaimSchema } from "./db-core";
+import { DATABASE_ID, TABLES, generatePermissions, stripSystemFields, normalizeText, stringifyClaimValue, ClaimSchema } from "./db-core";
 import { runWithTransaction, createAuditEntry, wrapTransactionResult } from "./db-audit";
 // getClaim will be defined in db-claims.js, for now it's a placeholder
 // getClaim import removed to avoid circular dependency and because it is unused

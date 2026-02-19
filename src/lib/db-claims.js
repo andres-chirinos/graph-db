@@ -1,5 +1,5 @@
 import { tablesDB, Query } from "./appwrite";
-import { DATABASE_ID, TABLES, generatePermissions, normalizeText, stringifyClaimValue } from "./db-core";
+import { DATABASE_ID, TABLES, generatePermissions, stripSystemFields, normalizeText, stringifyClaimValue } from "./db-core";
 import { runWithTransaction, createAuditEntry, wrapTransactionResult, updateRowPermissions } from "./db-audit";
 import { getQualifiersByClaim, getQualifiersByEntityRole } from "./db-qualifiers"; // Added getQualifiersByEntityRole
 import { getReferencesByClaim, getReferencesByEntityRole } from "./db-references"; // Added getReferencesByEntityRole

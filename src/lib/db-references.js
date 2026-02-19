@@ -1,5 +1,5 @@
 import { tablesDB, Query } from "./appwrite";
-import { DATABASE_ID, TABLES, generatePermissions } from "./db-core";
+import { DATABASE_ID, TABLES, stripSystemFields, generatePermissions } from "./db-core";
 import { runWithTransaction, createAuditEntry, wrapTransactionResult } from "./db-audit";
 
 // ============================================
