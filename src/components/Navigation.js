@@ -95,7 +95,7 @@ export default function Navigation() {
               onClick={() => setShowMobileMenu(!showMobileMenu)}
               aria-label="Toggle navigation"
             >
-              <span className={`icon-${showMobileMenu ? 'close' : 'menu'}`}></span>
+              <span className={`icon-${showMobileMenu ? 'menu' : 'menu'}`}></span>
             </button>
           </div>
 

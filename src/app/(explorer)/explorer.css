@@ -2600,9 +2600,9 @@
     grid-template-columns: 1fr;
   }
 
-  .nav-links span:not([class^="icon"]) {
+  /*.nav-links span:not([class^="icon"]) {
     display: none;
-  }
+  }*/
 
   .claim-main {
     flex-direction: column;
@@ -2622,9 +2622,9 @@
     grid-template-columns: 1fr;
   }
 
-  .user-details {
+  /*.user-details {
     display: none;
-  }
+  }*/
 
   .wdqs-header {
     flex-direction: column;
