@@ -126,20 +126,6 @@ export default function HomePage() {
                   <span className="stat-label">Entidades</span>
                 </div>
               </div>
-              <div className="stat-card">
-                <span className="icon-link stat-icon"></span>
-                <div className="stat-content">
-                  <span className="stat-value">—</span>
-                  <span className="stat-label">Declaraciones</span>
-                </div>
-              </div>
-              <div className="stat-card">
-                <span className="icon-tag stat-icon"></span>
-                <div className="stat-content">
-                  <span className="stat-value">—</span>
-                  <span className="stat-label">Propiedades</span>
-                </div>
-              </div>
             </div>
           </section>
         </div>

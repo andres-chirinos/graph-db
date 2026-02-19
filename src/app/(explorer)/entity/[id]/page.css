@@ -425,3 +425,31 @@
 .value-coordinate {
     display: inline-flex;
 }
+/* Entity Tabs */
+.entity-tabs {
+    display: flex;
+    gap: 1rem;
+    border-bottom: 1px solid var(--color-border-light);
+    margin-bottom: 1.5rem;
+}
+
+.entity-tab {
+    padding: 0.75rem 1rem;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.entity-tab:hover {
+    color: var(--color-primary);
+    background: var(--color-bg-alt);
+}
+
+.entity-tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+}

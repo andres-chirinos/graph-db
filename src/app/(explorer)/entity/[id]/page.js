@@ -4,6 +4,8 @@ import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { EntityHeader, ClaimsList, LoadingState, ErrorState, RelationshipsView } from "@/components";
+import EntityStatistics from "@/components/EntityStatistics";
+import EntityGraph from "@/components/EntityGraph";
 import { useAuth } from "@/context/AuthContext";
 import {
   getEntity,
@@ -19,6 +21,10 @@ import {
   createReference,
   updateReference,
   deleteReference,
+  getClaimsByValueRelation,
+  getClaimsByProperty,
+  getReferencesByEntityRole,
+  getQualifiersByEntityRole,
 } from "@/lib/database";
 import "./page.css";
 
@@ -31,7 +37,14 @@ export default function EntityPage({ params }) {
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState("overview");
 
+  const [graphData, setGraphData] = useState({
+    incoming: [],
+    asProperty: [],
+    references: [],
+    asQualifierValue: []
+  });
 
   // Permisos de edición basados en el contexto de autenticación
   const editable = canEdit || canCreate || canDelete;
@@ -46,10 +59,11 @@ export default function EntityPage({ params }) {
     setEntity(null);
     setClaims([]);
     try {
+      // 1. Fetch main entity
       const entityData = await getEntity(id, true);
       setEntity(entityData);
 
-      // Cargar detalles de cada claim (qualifiers y references)
+      // 2. Fetch outgoing claims details
       if (entityData.claims && entityData.claims.length > 0) {
         const claimsWithDetails = await Promise.all(
           entityData.claims.map((claim) => getClaim(claim.$id))
@@ -58,6 +72,23 @@ export default function EntityPage({ params }) {
       } else {
         setClaims([]);
       }
+
+      // 3. Fetch other relationships for Graph (Parallel)
+      // We fetch a reasonable limit for visualization (e.g., 50 each)
+      const limit = 50;
+      const [incomingRes, propertyRes, refRes, qualValueRes] = await Promise.all([
+        getClaimsByValueRelation(id, { limit }),
+        getClaimsByProperty(id, { limit }),
+        getReferencesByEntityRole(id, { limit }),
+        getQualifiersByEntityRole(id, { limit, role: 'value' })
+      ]);
+
+      setGraphData({
+        incoming: incomingRes?.claims || [],
+        asProperty: propertyRes?.claims || [],
+        references: refRes?.references || [],
+        asQualifierValue: qualValueRes?.qualifiers || []
+      });
 
     } catch (err) {
       setError(err);
@@ -205,67 +236,106 @@ export default function EntityPage({ params }) {
             onPermissionsUpdated={loadEntity}
           />
 
-          {/* Claims / Statements */}
-          <section className="entity-statements">
-            <h2 className="section-title">
-              <span className="icon-list"></span>
-              Declaraciones
-            </h2>
-            <ClaimsList
-              claims={claims}
-              subjectId={id}
-              editable={editable}
-              onClaimCreate={handleCreateClaim}
-              onClaimUpdate={handleUpdateClaim}
-              onClaimDelete={handleDeleteClaim}
-              onQualifierCreate={handleCreateQualifier}
-              onQualifierUpdate={handleUpdateQualifier}
-              onQualifierDelete={handleDeleteQualifier}
-              onReferenceCreate={handleCreateReference}
-              onReferenceUpdate={handleUpdateReference}
-              onReferenceDelete={handleDeleteReference}
-            />
-          </section>
+          {/* Tabs Navigation */}
+          <div className="entity-tabs">
+            <button
+              className={`entity-tab ${activeTab === "overview" ? "active" : ""}`}
+              onClick={() => setActiveTab("overview")}
+            >
+              Resumen
+            </button>
+            <button
+              className={`entity-tab ${activeTab === "statistics" ? "active" : ""}`}
+              onClick={() => setActiveTab("statistics")}
+            >
+              Estadísticas
+            </button>
+            <button
+              className={`entity-tab ${activeTab === "graph" ? "active" : ""}`}
+              onClick={() => setActiveTab("graph")}
+            >
+              Grafo
+            </button>
+          </div>
 
-          {/* Incoming Relations - Using new component */}
-          <RelationshipsView
-            entityId={id}
-            type="incoming"
-            title="Lo que enlaza aquí"
-            icon="icon-arrow-left"
-          />
+          {/* Tab Content */}
+          {activeTab === "overview" && (
+            <>
+              {/* Claims / Statements */}
+              <section className="entity-statements">
+                <h2 className="section-title">
+                  <span className="icon-list"></span>
+                  Declaraciones
+                </h2>
+                <ClaimsList
+                  claims={claims}
+                  subjectId={id}
+                  editable={editable}
+                  onClaimCreate={handleCreateClaim}
+                  onClaimUpdate={handleUpdateClaim}
+                  onClaimDelete={handleDeleteClaim}
+                  onQualifierCreate={handleCreateQualifier}
+                  onQualifierUpdate={handleUpdateQualifier}
+                  onQualifierDelete={handleDeleteQualifier}
+                  onReferenceCreate={handleCreateReference}
+                  onReferenceUpdate={handleUpdateReference}
+                  onReferenceDelete={handleDeleteReference}
+                />
+              </section>
 
-          {/* Used as Property - Using new component */}
-          <RelationshipsView
-            entityId={id}
-            type="property"
-            title="Usado como propiedad"
-            icon="icon-tag"
-          />
+              {/* Incoming Relations - Using new component */}
+              <RelationshipsView
+                entityId={id}
+                type="incoming"
+                title="Lo que enlaza aquí"
+                icon="icon-arrow-left"
+              />
 
-          {/* Used as Property in Qualifiers */}
-          <RelationshipsView
-            entityId={id}
-            type="qualifier_property"
-            title="Usado como propiedad (Calificador)"
-            icon="icon-tag"
-          />
+              {/* Used as Property - Using new component */}
+              <RelationshipsView
+                entityId={id}
+                type="property"
+                title="Usado como propiedad"
+                icon="icon-tag"
+              />
 
-          {/* Used as Value in Qualifiers */}
-          <RelationshipsView
-            entityId={id}
-            type="qualifier_value"
-            title="Usado como valor (Calificador)"
-            icon="icon-link"
-          />
+              {/* Used as Property in Qualifiers */}
+              <RelationshipsView
+                entityId={id}
+                type="qualifier_property"
+                title="Usado como propiedad (Calificador)"
+                icon="icon-tag"
+              />
 
-          {/* Referenced In - Using new component */}
-          <RelationshipsView
-            entityId={id}
-            type="references"
-            title="Citado en"
-            icon="icon-book"
-          />
+              {/* Used as Value in Qualifiers */}
+              <RelationshipsView
+                entityId={id}
+                type="qualifier_value"
+                title="Usado como valor (Calificador)"
+                icon="icon-link"
+              />
+
+              {/* Referenced In - Using new component */}
+              <RelationshipsView
+                entityId={id}
+                type="references"
+                title="Citado en"
+                icon="icon-book"
+              />
+            </>
+          )}
+
+          {activeTab === "statistics" && (
+            <div className="mt-6">
+              <EntityStatistics entity={{ ...entity, claims }} />
+            </div>
+          )}
+
+          {activeTab === "graph" && (
+            <div className="mt-6">
+              <EntityGraph entity={{ ...entity, claims }} otherRelations={graphData} />
+            </div>
+          )}
         </div>
       </main>
     </div>
