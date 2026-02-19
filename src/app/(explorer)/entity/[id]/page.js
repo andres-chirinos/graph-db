@@ -25,6 +25,7 @@ import {
   getClaimsByProperty,
   getReferencesByEntityRole,
   getQualifiersByEntityRole,
+  getClaimsBySubject,
 } from "@/lib/database";
 import "./page.css";
 
@@ -38,6 +39,13 @@ export default function EntityPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
+
+  // Claims Pagination & Filtering State
+  const [claimsPage, setClaimsPage] = useState(1);
+  const [claimsLimit] = useState(10);
+  const [claimsTotal, setClaimsTotal] = useState(0);
+  const [claimsFilters, setClaimsFilters] = useState({ property: null, value: "" });
+  const [claimsLoading, setClaimsLoading] = useState(false);
 
   const [graphData, setGraphData] = useState({
     incoming: [],
@@ -53,6 +61,34 @@ export default function EntityPage({ params }) {
     loadEntity();
   }, [id]);
 
+  // Fetch claims when page/filters change (only after initial load)
+  useEffect(() => {
+    if (entity) {
+      loadClaims();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimsPage, claimsFilters]);
+
+  async function loadClaims() {
+    if (!entity) return;
+    setClaimsLoading(true);
+    try {
+      const offset = (claimsPage - 1) * claimsLimit;
+      const result = await getClaimsBySubject(id, {
+        limit: claimsLimit,
+        offset,
+        filters: claimsFilters
+      });
+      setClaims(result.claims || []);
+      setClaimsTotal(result.total || 0);
+    } catch (err) {
+      console.error("Error loading claims:", err);
+      // Optional: set specific error state for claims section
+    } finally {
+      setClaimsLoading(false);
+    }
+  }
+
   async function loadEntity() {
     setLoading(true);
     setError(null);
@@ -63,15 +99,16 @@ export default function EntityPage({ params }) {
       const entityData = await getEntity(id, true);
       setEntity(entityData);
 
-      // 2. Fetch outgoing claims details
-      if (entityData.claims && entityData.claims.length > 0) {
-        const claimsWithDetails = await Promise.all(
-          entityData.claims.map((claim) => getClaim(claim.$id))
-        );
-        setClaims(claimsWithDetails);
-      } else {
-        setClaims([]);
-      }
+      // 2. Fetch outgoing claims details with pagination
+      // Initial load uses default page 1 and empty filters
+      const claimsOffset = 0;
+      const claimsResult = await getClaimsBySubject(id, {
+        limit: claimsLimit,
+        offset: claimsOffset,
+        filters: claimsFilters
+      });
+      setClaims(claimsResult.claims || []);
+      setClaimsTotal(claimsResult.total || 0);
 
       // 3. Fetch other relationships for Graph (Parallel)
       // We fetch a reasonable limit for visualization (e.g., 50 each)
@@ -112,8 +149,10 @@ export default function EntityPage({ params }) {
   async function handleCreateClaim(data) {
     const teamId = activeTeam?.$id || null;
     const newClaimRaw = await createClaim(data, teamId);
-    const newClaim = await getClaim(newClaimRaw.$id); // Fetch fully expanded claim
-    setClaims(prev => [...prev, newClaim]);
+    // Refresh claims list to show new claim at top or refresh current page
+    await loadClaims();
+    // const newClaim = await getClaim(newClaimRaw.$id); // Fetch fully expanded claim
+    // setClaims(prev => [...prev, newClaim]);
   }
 
   async function handleUpdateClaim(data, claimId) {
@@ -269,6 +308,16 @@ export default function EntityPage({ params }) {
                 </h2>
                 <ClaimsList
                   claims={claims}
+                  loading={claimsLoading}
+                  page={claimsPage}
+                  limit={claimsLimit}
+                  total={claimsTotal}
+                  onPageChange={setClaimsPage}
+                  filters={claimsFilters}
+                  onFilterChange={(newFilters) => {
+                    setClaimsFilters(prev => ({ ...prev, ...newFilters }));
+                    setClaimsPage(1); // Reset to page 1 on filter change
+                  }}
                   subjectId={id}
                   editable={editable}
                   onClaimCreate={handleCreateClaim}

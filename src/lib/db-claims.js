@@ -159,21 +159,41 @@ async function expandClaimDetails(claim) {
 }
 
 /**
- * Obtiene todos los claims de un sujeto (entidad)
+ * Obtiene todos los claims de un sujeto (entidad) con paginación y filtros
  * Incluye los datos expandidos de property y value_relation
  */
-export async function getClaimsBySubject(subjectId) {
+export async function getClaimsBySubject(subjectId, options = {}) {
+  const { limit = 10, offset = 0, filters = {} } = options;
+  const queries = [
+    Query.equal("subject", subjectId),
+    Query.limit(limit),
+    Query.offset(offset),
+    Query.orderDesc("$createdAt"), // Default order
+    Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
+  ];
+
+  if (filters.property) {
+    queries.push(Query.equal("property", filters.property));
+  }
+
+  if (filters.value) {
+    // Search in value_raw. Appwrite search is minimal, but better than nothing.
+    // Ideally we'd have normalized fields or dedicated search index.
+    queries.push(Query.search("value_raw", filters.value));
+  }
+
   const result = await tablesDB.listRows({
     databaseId: DATABASE_ID,
     tableId: TABLES.CLAIMS,
-    queries: [
-      Query.equal("subject", subjectId),
-      Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
-      Query.limit(10),
-    ],
+    queries,
   });
 
-  return result.rows;
+  const claims = await Promise.all(result.rows.map(claim => expandClaimDetails(claim)));
+
+  return {
+    claims,
+    total: result.total
+  };
 }
 
 /**
