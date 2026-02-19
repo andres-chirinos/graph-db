@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import "./style.css";
+import "./page.css";
 
 // Database ID para los ejemplos
 const DB_ID = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID;

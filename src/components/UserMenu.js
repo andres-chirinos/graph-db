@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
+import "./UserMenu.css";
 
 export default function UserMenu({ onLoginClick }) {
   const {

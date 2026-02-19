@@ -1,0 +1,116 @@
+/* ============================================
+   MODAL STYLES
+   ============================================ */
+
+.modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: var(--spacing-md);
+}
+
+.modal-content {
+    background: var(--color-bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-small {
+    width: 100%;
+    max-width: 400px;
+}
+
+.modal-medium {
+    width: 100%;
+    max-width: 560px;
+}
+
+.modal-large {
+    width: 100%;
+    max-width: 800px;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.modal-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+}
+
+.modal-close:hover {
+    background: var(--color-bg-alt);
+    color: var(--color-text);
+}
+
+.modal-body {
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-footer {
+    display: flex;
+    gap: var(--spacing-md);
+    justify-content: flex-end;
+    padding: var(--spacing-lg);
+    border-top: 1px solid var(--color-border-light);
+    background: var(--color-bg);
+}
+
+/* Permissions modal */
+.permissions-modal {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.permissions-help {
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+}
+
+.permissions-textarea {
+    width: 100%;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md, 4px);
+    padding: 0.75rem;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.85rem;
+    resize: vertical;
+}
+
+.confirm-message {
+    color: var(--color-text);
+    margin: 0;
+    line-height: 1.5;
+}

@@ -1,0 +1,67 @@
+/* ============================================
+   HERO SECTION
+   ============================================ */
+
+.hero-section {
+    text-align: center;
+    padding: var(--spacing-2xl, 3rem) 0;
+}
+
+.hero-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--color-text, #202122);
+    margin-bottom: var(--spacing-sm, 0.5rem);
+}
+
+.hero-subtitle {
+    font-size: 1.125rem;
+    color: var(--color-text-secondary, #54595d);
+    margin-bottom: var(--spacing-xl, 2rem);
+}
+
+/* ============================================
+   SECTIONS
+   ============================================ */
+
+.entities-section,
+.stats-section,
+.results-section,
+.search-section {
+    margin-top: var(--spacing-2xl, 3rem);
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-lg, 1.5rem);
+}
+
+.section-title {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 0.5rem);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text, #202122);
+}
+
+.view-all-link {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs, 0.25rem);
+    color: var(--color-primary, #0645ad);
+    text-decoration: none;
+    font-size: 0.875rem;
+}
+
+.view-all-link:hover {
+    text-decoration: underline;
+}
+
+.entities-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: var(--spacing-md, 1rem);
+}

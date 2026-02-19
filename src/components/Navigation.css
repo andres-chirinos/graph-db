@@ -264,3 +264,48 @@
         display: block;
     }
 }
+
+/* Iconos de navegación */
+.nav-link .icon-home::before {
+    content: "🏠";
+}
+
+.nav-link .icon-list::before {
+    content: "📋";
+}
+
+.nav-link .icon-search::before {
+    content: "🔍";
+}
+
+.nav-link .icon-code::before {
+    content: "⚡";
+}
+
+.nav-link .icon-settings::before {
+    content: "⚙️";
+}
+
+.icon-team::before {
+    content: "👥";
+}
+
+.icon-import::before {
+    content: "📥";
+}
+
+.icon-maximize::before {
+    content: "⛶";
+}
+
+.logout-btn {
+    color: var(--color-error);
+}
+
+.dropdown-item .icon-code::before {
+    content: "⚡";
+}
+
+.dropdown-item .icon-logout::before {
+    content: "🚪";
+}

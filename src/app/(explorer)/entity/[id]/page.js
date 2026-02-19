@@ -20,7 +20,7 @@ import {
   updateReference,
   deleteReference,
 } from "@/lib/database";
-import "./style.css";
+import "./page.css";
 
 export default function EntityPage({ params }) {
   const { id } = use(params);

@@ -7,6 +7,12 @@ import { searchEntities } from "@/lib/database";
  * Selector de entidades con búsqueda
  * Permite buscar y seleccionar una entidad existente
  */
+import "./EntitySelector.css";
+
+/**
+ * Selector de entidades con búsqueda
+ * Permite buscar y seleccionar una entidad existente
+ */
 export default function EntitySelector({
   value,
   onChange,
@@ -46,7 +52,7 @@ export default function EntitySelector({
   // Cargar entidad seleccionada si viene un ID
   useEffect(() => {
     let cancelled = false;
-    
+
     async function loadEntity() {
       if (value && typeof value === "object") {
         if (!cancelled) setSelectedEntity(value);
@@ -66,9 +72,9 @@ export default function EntitySelector({
         if (!cancelled) setSelectedEntity(null);
       }
     }
-    
+
     loadEntity();
-    
+
     return () => {
       cancelled = true;
     };
@@ -169,7 +175,7 @@ export default function EntitySelector({
 
     searchTimeout.current = setTimeout(async () => {
       if (!isMounted.current || cancelled) return;
-      
+
       setLoading(true);
       try {
         const result = await searchEntitiesPage(trimmed, 0);
@@ -267,10 +273,10 @@ export default function EntitySelector({
       {selectedEntity ? (
         <div className="entity-selected">
           <div className="entity-selected-info">
-            <span className="entity-selected-id">{selectedEntity.$id}</span>
             <span className="entity-selected-label">
               {selectedEntity.label || "(Sin etiqueta)"}
             </span>
+            <span className="entity-selected-id">ID: {selectedEntity.$id}</span>
           </div>
           {!disabled && (
             <button
@@ -313,13 +319,20 @@ export default function EntitySelector({
                           className="entity-search-result"
                           onClick={() => handleSelect(entity)}
                         >
-                          <span className="result-id">{entity.$id}</span>
-                          <span className="result-label">
-                            {entity.label || "(Sin etiqueta)"}
-                          </span>
+                          <div className="result-header">
+                            <span className="result-label">
+                              {entity.label || "(Sin etiqueta)"}
+                            </span>
+                            <span className="result-id">#{entity.$id}</span>
+                          </div>
                           {entity.description && (
                             <span className="result-description">
                               {entity.description}
+                            </span>
+                          )}
+                          {entity.aliases && entity.aliases.length > 0 && (
+                            <span className="result-aliases">
+                              Alias: {entity.aliases.join(", ")}
                             </span>
                           )}
                         </button>

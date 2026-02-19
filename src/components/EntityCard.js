@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import "./EntityCard.css";
 
 /**
  * Tarjeta de entidad para listados

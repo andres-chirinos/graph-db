@@ -1,0 +1,89 @@
+/* ============================================
+   SEARCH BAR
+   ============================================ */
+
+.search-bar {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.search-input-wrapper {
+    display: flex;
+    align-items: center;
+    background: var(--color-bg-card, #ffffff);
+    border: 2px solid var(--color-border, #a2a9b1);
+    border-radius: var(--radius-lg, 8px);
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+
+.search-input-wrapper:focus-within {
+    border-color: var(--color-primary, #0645ad);
+}
+
+.search-icon {
+    padding: var(--spacing-md, 1rem);
+    color: var(--color-text-muted, #72777d);
+}
+
+.search-input {
+    flex: 1;
+    padding: var(--spacing-md, 1rem);
+    border: none;
+    font-size: 1rem;
+    color: var(--color-text, #202122);
+    background: transparent;
+}
+
+.search-input:focus {
+    outline: none;
+}
+
+.search-input::placeholder {
+    color: var(--color-text-muted, #72777d);
+}
+
+.search-button {
+    padding: var(--spacing-md, 1rem) var(--spacing-xl, 2rem);
+    background: var(--color-primary, #0645ad);
+    color: white;
+    border: none;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.search-button:hover:not(:disabled) {
+    background: var(--color-primary-hover, #0b0080);
+}
+
+.search-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.search-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md, 1rem);
+    margin-top: var(--spacing-md, 1rem);
+    color: var(--color-text-secondary, #54595d);
+}
+
+.clear-search {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs, 0.25rem);
+    padding: var(--spacing-xs, 0.25rem) var(--spacing-sm, 0.5rem);
+    background: var(--color-bg-alt, #eaecf0);
+    border: 1px solid var(--color-border-light, #c8ccd1);
+    border-radius: var(--radius-md, 4px);
+    color: var(--color-text-secondary, #54595d);
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+
+.clear-search:hover {
+    background: var(--color-border-light, #c8ccd1);
+}

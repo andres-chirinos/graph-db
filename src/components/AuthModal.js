@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import "./AuthModal.css";
 
 export default function AuthModal({ isOpen, onClose, initialMode = "login" }) {
   const [mode, setMode] = useState(initialMode);
@@ -99,8 +100,8 @@ export default function AuthModal({ isOpen, onClose, initialMode = "login" }) {
             {loading
               ? "Procesando..."
               : mode === "login"
-              ? "Iniciar Sesión"
-              : "Crear Cuenta"}
+                ? "Iniciar Sesión"
+                : "Crear Cuenta"}
           </button>
         </form>
 

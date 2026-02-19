@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { SearchBar, EntityCard, LoadingState, EmptyState, ErrorState } from "@/components";
 import { listEntities, searchEntities } from "@/lib/database";
+import "@/components/Stats.css";
+import "./home.css";
 
 export default function HomePage() {
   const [entities, setEntities] = useState([]);

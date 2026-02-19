@@ -1,0 +1,179 @@
+/* ============================================
+   FORM STYLES
+   ============================================ */
+
+.form-group {
+    margin-bottom: var(--spacing-lg);
+}
+
+.form-group:last-child {
+    margin-bottom: 0;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: var(--spacing-xs);
+    font-weight: 500;
+    color: var(--color-text);
+    font-size: 0.875rem;
+}
+
+.form-label .required {
+    color: var(--color-error);
+    margin-left: 2px;
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 0.9375rem;
+    color: var(--color-text);
+    background: var(--color-bg-card);
+    transition: border-color 0.2s;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(6, 69, 173, 0.1);
+}
+
+.form-input:disabled,
+.form-select:disabled,
+.form-textarea:disabled {
+    background: var(--color-bg-alt);
+    cursor: not-allowed;
+}
+
+.form-textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.form-textarea-code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+}
+
+.form-hint {
+    margin-top: var(--spacing-xs);
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+}
+
+.form-error {
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    background: #fee;
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-md);
+    color: var(--color-error);
+    font-size: 0.875rem;
+}
+
+.radio-group {
+    display: flex;
+    gap: var(--spacing-lg);
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--color-text);
+}
+
+.radio-label input[type="radio"] {
+    accent-color: var(--color-primary);
+}
+
+/* ============================================
+   VALUE INPUT STYLES
+   ============================================ */
+
+.value-input-row {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.value-type-select {
+    width: 140px;
+    flex-shrink: 0;
+}
+
+.value-data-input {
+    flex: 1;
+}
+
+.color-input-wrapper {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.color-input-wrapper input[type="color"] {
+    width: 40px;
+    height: 38px;
+    padding: 2px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.color-list-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.color-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.color-list-item {
+    display: grid;
+    grid-template-columns: 40px 1fr auto;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.color-list-item input[type="color"] {
+    width: 40px;
+    height: 38px;
+    padding: 2px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.color-list-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.color-list-empty {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    padding: 6px 0;
+}
+
+.color-list-footer {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.color-list-hint {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}

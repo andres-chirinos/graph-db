@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import "./SearchBar.css";
 
 /**
  * Barra de búsqueda de entidades

@@ -26,7 +26,7 @@ import {
   deleteUserApiKey,
   isApiKeyListSupported,
 } from "@/lib/auth";
-import "./style.css";
+import "./page.css";
 
 const OAUTH_PROVIDERS = [
   { id: "google", label: "Google" },

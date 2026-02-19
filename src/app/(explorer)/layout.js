@@ -1,4 +1,7 @@
 import "../app.css";
+import "@/components/Button.css";
+import "@/components/Form.css";
+import "@/components/Modal.css";
 import "./explorer.css";
 import "@appwrite.io/pink-icons";
 import { Navigation, Footer } from "@/components";

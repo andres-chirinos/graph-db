@@ -3,6 +3,7 @@
 /**
  * Estados de carga y error para el explorador
  */
+import "./States.css";
 
 export function LoadingState({ message = "Cargando..." }) {
   return (
@@ -13,10 +14,10 @@ export function LoadingState({ message = "Cargando..." }) {
   );
 }
 
-export function ErrorState({ 
-  error, 
-  title = "Error", 
-  onRetry 
+export function ErrorState({
+  error,
+  title = "Error",
+  onRetry
 }) {
   return (
     <div className="error-state">
@@ -33,10 +34,10 @@ export function ErrorState({
   );
 }
 
-export function EmptyState({ 
-  title = "Sin resultados", 
-  message = "No se encontraron elementos", 
-  icon = "inbox" 
+export function EmptyState({
+  title = "Sin resultados",
+  message = "No se encontraron elementos",
+  icon = "inbox"
 }) {
   return (
     <div className="empty-state">
