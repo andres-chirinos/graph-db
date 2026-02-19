@@ -128,11 +128,43 @@ export async function searchEntitiesByPropertyValue(propertyId, value, limit = 1
       for (const claim of rows) {
         const claimValue = normalizeText(stringifyClaimValue(claim.value_raw));
         if (!claimValue || !searchValue) continue;
-        const matches = mode === "equal"
-          ? claimValue === searchValue
-          : claimValue === searchValue || // exact match for contains
-          claimValue.includes(searchValue) || // contained match
-          searchValue.includes(claimValue); // contained match (inverse)
+        if (!claimValue || !searchValue) continue;
+
+        // Numeric comparison helper
+        const claimNum = parseFloat(claimValue);
+        const condNum = parseFloat(searchValue);
+        const isNumeric = !isNaN(claimNum) && !isNaN(condNum);
+
+        let matches = false;
+        switch (matchMode) {
+          case "equal":
+            matches = claimValue === searchValue;
+            break;
+          case "notEqual":
+            matches = claimValue !== searchValue;
+            break;
+          case "startsWith":
+            matches = claimValue.startsWith(searchValue);
+            break;
+          case "endsWith":
+            matches = claimValue.endsWith(searchValue);
+            break;
+          case "greaterThan":
+            matches = isNumeric && claimNum > condNum;
+            break;
+          case "greaterThanEqual":
+            matches = isNumeric && claimNum >= condNum;
+            break;
+          case "lessThan":
+            matches = isNumeric && claimNum < condNum;
+            break;
+          case "lessThanEqual":
+            matches = isNumeric && claimNum <= condNum;
+            break;
+          case "contains":
+          default:
+            matches = claimValue.includes(searchValue);
+        }
         if (matches) {
           const id = claim.subject?.$id || claim.subject;
           if (id) entityIds.add(id);
@@ -256,30 +288,37 @@ export async function searchEntitiesAdvanced(conditions, limit = 10) {
  * @param {number} offset - The number of entities to skip (for pagination).
  * @returns {Promise<Array<Object>>} - A list of entities that match the schema.
  */
-export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
-  const { text, properties = [], claims = [], logic = "AND" } = schema;
+async function _findEntityIds(schema, limit) {
+  const { text, properties = [], claims = [], groups = [], logic = "AND" } = schema;
 
   let candidateEntityIds = new Set();
   let firstConditionProcessed = false;
 
   // 1. Process text search condition
   if (text) {
-    const textMatches = await searchEntities(text, limit * 5, 0); // Fetch more than limit to allow for further filtering
+    const textMatches = await searchEntities(text, limit * 5, 0);
     const ids = textMatches.rows.map(entity => entity.$id);
     candidateEntityIds = new Set(ids);
     firstConditionProcessed = true;
   }
 
+  // Helper to merge results based on logic
+  const mergeIds = (currentSet, newSet, isFirstInLoop) => {
+    if (logic === "AND") {
+      if (firstConditionProcessed || !isFirstInLoop) {
+        return new Set([...currentSet].filter(id => newSet.has(id)));
+      } else {
+        return newSet;
+      }
+    } else { // OR
+      return new Set([...currentSet, ...newSet]);
+    }
+  };
+
   // 2. Process direct properties conditions
   if (properties.length > 0) {
-    let propertyMatchedIds = new Set();
-    // For OR logic, initialize with current candidates if already processed, else empty
-    if (logic === "AND" && firstConditionProcessed) {
-      propertyMatchedIds = new Set([...candidateEntityIds]);
-    } else if (logic === "OR" && firstConditionProcessed) {
-      propertyMatchedIds = new Set([...candidateEntityIds]);
-    }
-
+    let propertyMatchedIds = new Set(firstConditionProcessed ? candidateEntityIds : []);
+    let firstProp = true;
 
     for (const propCondition of properties) {
       if (!propCondition.propertyId || !propCondition.value) continue;
@@ -291,24 +330,11 @@ export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
       );
       const currentPropIds = new Set(propMatches.map(entity => entity.$id));
 
-      if (logic === "AND") {
-        if (firstConditionProcessed || properties.indexOf(propCondition) > 0) { // For subsequent AND conditions, intersect
-          propertyMatchedIds = new Set([...propertyMatchedIds].filter(id => currentPropIds.has(id)));
-        } else { // For the first property condition (if no text search), initialize
-          propertyMatchedIds = currentPropIds;
-        }
-      } else { // OR logic
-        propertyMatchedIds = new Set([...propertyMatchedIds, ...currentPropIds]);
-      }
+      propertyMatchedIds = mergeIds(propertyMatchedIds, currentPropIds, firstProp);
+      firstProp = false;
     }
 
-    if (firstConditionProcessed) {
-      if (logic === "AND") {
-        candidateEntityIds = new Set([...candidateEntityIds].filter(id => propertyMatchedIds.has(id)));
-      } else { // OR logic
-        candidateEntityIds = new Set([...candidateEntityIds, ...propertyMatchedIds]);
-      }
-    } else {
+    if (!firstProp) { // If we processed at least one valid property
       candidateEntityIds = propertyMatchedIds;
       firstConditionProcessed = true;
     }
@@ -316,48 +342,63 @@ export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
 
   // 3. Process complex claims conditions
   if (claims.length > 0) {
-    let claimMatchedIds = new Set();
-    // For OR logic, initialize with current candidates if already processed, else empty
-    if (logic === "AND" && firstConditionProcessed) {
-      claimMatchedIds = new Set([...candidateEntityIds]);
-    } else if (logic === "OR" && firstConditionProcessed) {
-      claimMatchedIds = new Set([...candidateEntityIds]);
-    }
+    let claimMatchedIds = new Set(firstConditionProcessed ? candidateEntityIds : []);
+    let firstClaim = true;
 
     for (const claimCondition of claims) {
       const currentClaimSubjectIds = await _searchClaimsBySchemaCondition(claimCondition, limit * 5, 0);
-
-      if (logic === "AND") {
-        if (firstConditionProcessed || claims.indexOf(claimCondition) > 0) { // For subsequent AND conditions, intersect
-          claimMatchedIds = new Set([...claimMatchedIds].filter(id => currentClaimSubjectIds.has(id)));
-        } else { // For the first claim condition (if no text/property search), initialize
-          claimMatchedIds = currentClaimSubjectIds;
-        }
-      } else { // OR logic
-        claimMatchedIds = new Set([...claimMatchedIds, ...currentClaimSubjectIds]);
-      }
+      claimMatchedIds = mergeIds(claimMatchedIds, currentClaimSubjectIds, firstClaim);
+      firstClaim = false;
     }
 
-    if (firstConditionProcessed) {
-      if (logic === "AND") {
-        candidateEntityIds = new Set([...candidateEntityIds].filter(id => claimMatchedIds.has(id)));
-      } else { // OR logic
-        candidateEntityIds = new Set([...candidateEntityIds, ...claimMatchedIds]);
-      }
-    } else {
+    if (!firstClaim) {
       candidateEntityIds = claimMatchedIds;
       firstConditionProcessed = true;
     }
   }
 
-  // If no conditions were specified, return empty or all entities (decided to return empty for now)
+  // 4. Process nested groups (recursive)
+  if (groups.length > 0) {
+    let groupMatchedIds = new Set(firstConditionProcessed ? candidateEntityIds : []);
+    let firstGroup = true;
+
+    for (const groupSchema of groups) {
+      const matchedIds = await _findEntityIds(groupSchema, limit);
+      const currentGroupIds = new Set(matchedIds);
+      groupMatchedIds = mergeIds(groupMatchedIds, currentGroupIds, firstGroup);
+      firstGroup = false;
+    }
+
+    if (!firstGroup) {
+      candidateEntityIds = groupMatchedIds;
+      firstConditionProcessed = true;
+    }
+  }
+
   if (!firstConditionProcessed) {
     return [];
   }
 
-  const finalEntityIds = Array.from(candidateEntityIds).slice(offset, offset + limit);
+  return Array.from(candidateEntityIds);
+}
+
+/**
+ * Searches for entities based on a complex schema definition.
+ * 
+ * @param {EntitySchema} schema - The schema definition to search for.
+ * @param {number} limit - The maximum number of entities to return.
+ * @param {number} offset - The number of entities to skip.
+ * @returns {Promise<Array<Object>>} - A list of entities.
+ */
+export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
+  // Use the internal helper to find IDs efficiently including groups
+  const allIds = await _findEntityIds(schema, limit + offset + 50);
+
+  // Pagination slice
+  const pagedIds = allIds.slice(offset, offset + limit);
+
   const entities = [];
-  for (const id of finalEntityIds) {
+  for (const id of pagedIds) {
     try {
       const entity = await tablesDB.getRow({
         databaseId: DATABASE_ID,
@@ -382,7 +423,7 @@ export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
  * @returns {Promise<Object>} - An object indicating compliance status and details.
  */
 export async function checkEntitySchemaCompliance(entityId, schema) {
-  const { text, properties = [], claims = [], logic = "AND" } = schema;
+  const { text, properties = [], claims = [], groups = [], logic = "AND" } = schema;
 
   const entity = await getEntity(entityId, true); // Fetch entity with all relations
   if (!entity) {
@@ -412,13 +453,38 @@ export async function checkEntitySchemaCompliance(entityId, schema) {
     if (entity.claims && Array.isArray(entity.claims)) {
       propertyMatch = entity.claims.some(claim => {
         if (claim.property?.$id === propCondition.propertyId) {
-          const normalizedClaimValue = normalizeText(stringifyClaimValue(claim.value_raw));
-          const normalizedConditionValue = normalizeText(propCondition.value);
+          const rawClaimValue = stringifyClaimValue(claim.value_raw);
+          const normalizedClaimValue = normalizeText(rawClaimValue);
+          const rawConditionValue = propCondition.value;
+          const normalizedConditionValue = normalizeText(rawConditionValue);
           const matchMode = propCondition.matchMode || "contains";
 
-          return matchMode === "equal"
-            ? normalizedClaimValue === normalizedConditionValue
-            : normalizedClaimValue.includes(normalizedConditionValue);
+          // Numeric comparison helper
+          const claimNum = parseFloat(rawClaimValue);
+          const condNum = parseFloat(rawConditionValue);
+          const isNumeric = !isNaN(claimNum) && !isNaN(condNum);
+
+          switch (matchMode) {
+            case "equal":
+              return normalizedClaimValue === normalizedConditionValue;
+            case "notEqual":
+              return normalizedClaimValue !== normalizedConditionValue;
+            case "startsWith":
+              return normalizedClaimValue.startsWith(normalizedConditionValue);
+            case "endsWith":
+              return normalizedClaimValue.endsWith(normalizedConditionValue);
+            case "greaterThan":
+              return isNumeric && claimNum > condNum;
+            case "greaterThanEqual":
+              return isNumeric && claimNum >= condNum;
+            case "lessThan":
+              return isNumeric && claimNum < condNum;
+            case "lessThanEqual":
+              return isNumeric && claimNum <= condNum;
+            case "contains":
+            default:
+              return normalizedClaimValue.includes(normalizedConditionValue);
+          }
         }
         return false;
       });
@@ -456,6 +522,14 @@ export async function checkEntitySchemaCompliance(entityId, schema) {
 
   const claimResults = await Promise.all(claimChecks);
   complianceResults.push(...claimResults);
+
+  // 4. Check nested groups (recursive)
+  if (groups.length > 0) {
+    const groupChecks = groups.map(groupSchema => checkEntitySchemaCompliance(entityId, groupSchema));
+    const groupResults = await Promise.all(groupChecks);
+    // checkEntitySchemaCompliance returns { isCompliant, ... }
+    complianceResults.push(...groupResults.map(r => r.isCompliant));
+  }
 
   let isCompliant;
   if (logic === "AND") {

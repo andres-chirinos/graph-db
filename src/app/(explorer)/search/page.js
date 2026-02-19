@@ -2,9 +2,21 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { SearchBar, EntityCard, LoadingState, EmptyState, ErrorState, EntitySelector } from "@/components";
+import { EntityCard, LoadingState, EmptyState, ErrorState, EntitySelector } from "@/components";
 import { searchEntities, searchEntitiesBySchema } from "@/lib/database";
 import "./style.css";
+
+const OPERATORS = [
+  { value: "equal", label: "equal", type: "text" },
+  { value: "notEqual", label: "notEqual", type: "text" },
+  { value: "startsWith", label: "startsWith", type: "text" },
+  { value: "endsWith", label: "endsWith", type: "text" },
+  { value: "contains", label: "contains", type: "text" },
+  { value: "greaterThan", label: "greaterThan", type: "numeric" },
+  { value: "greaterThanEqual", label: "greaterThanEqual", type: "numeric" },
+  { value: "lessThan", label: "lessThan", type: "numeric" },
+  { value: "lessThanEqual", label: "lessThanEqual", type: "numeric" },
+];
 
 export default function SearchPage() {
   return (
@@ -29,91 +41,151 @@ function SearchContent() {
   const [searchSummary, setSearchSummary] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Advanced Search State
-  const [advancedText, setAdvancedText] = useState("");
-  const [logic, setLogic] = useState("AND");
-  const [advancedConditions, setAdvancedConditions] = useState([]);
+  // Advanced Search State - Grouping
+  const [rootGroup, setRootGroup] = useState({
+    id: "root",
+    type: "group",
+    logic: "AND",
+    children: []
+  });
 
   const searchParams = useSearchParams();
 
   useEffect(() => {
     const queryParam = searchParams.get("q") || "";
-    const mode = searchParams.get("mode");
-    if (mode === "advanced") {
-      setShowAdvanced(true);
-    }
-
+    // We don't need distinct 'mode' check anymore as UI is unified
     if (queryParam && queryParam !== searchQuery) {
       setSearchQuery(queryParam);
-      setAdvancedText(queryParam);
+      // Trigger search only if there's a query
       handleSearch(queryParam);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  // Wrapper for simple text search (e.g. from URL or retry)
   async function handleSearch(query) {
     setSearchQuery(query);
-    setLoading(true);
-    setError(null);
-    setHasSearched(true);
-    setSearchSummary(query);
-    try {
-      const result = await searchEntities(query, 50);
-      setResults(result.rows);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setLoading(false);
-    }
+    // Execute search with current tree + new query
+    // We can't rely on state update immediately, so we pass query explicitly
+    executeSearch(query, rootGroup);
   }
 
-  function addAdvancedCondition() {
-    setAdvancedConditions((prev) => [
-      ...prev,
-      { id: Date.now() + Math.random(), propertyId: null, value: "", matchMode: "contains" },
-    ]);
-  }
+  // Recursive State Updaters
+  const updateNode = (nodeId, updates) => {
+    const recursiveUpdate = (node) => {
+      if (node.id === nodeId) {
+        return { ...node, ...updates };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(recursiveUpdate) };
+      }
+      return node;
+    };
+    setRootGroup((prev) => recursiveUpdate(prev));
+  };
 
-  function updateAdvancedCondition(id, updates) {
-    setAdvancedConditions((prev) =>
-      prev.map((condition) =>
-        condition.id === id ? { ...condition, ...updates } : condition
-      )
-    );
-  }
+  const addCondition = (groupId) => {
+    const targetId = groupId || "root"; // Default to root if no ID passed (e.g. main button)
+    const newCondition = {
+      id: Date.now() + Math.random(),
+      type: "condition",
+      propertyId: null,
+      value: "",
+      matchMode: "equal"
+    };
+    const recursiveAdd = (node) => {
+      if (node.id === targetId) {
+        return { ...node, children: [...node.children, newCondition] };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(recursiveAdd) };
+      }
+      return node;
+    };
+    setRootGroup((prev) => recursiveAdd(prev));
+  };
 
-  function removeAdvancedCondition(id) {
-    setAdvancedConditions((prev) => prev.filter((condition) => condition.id !== id));
-  }
+  const addGroup = (groupId) => {
+    const targetId = groupId || "root";
+    const newGroup = {
+      id: Date.now() + Math.random(),
+      type: "group",
+      logic: "OR",
+      children: []
+    };
+    const recursiveAdd = (node) => {
+      if (node.id === targetId) {
+        return { ...node, children: [...node.children, newGroup] };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(recursiveAdd) };
+      }
+      return node;
+    };
+    setRootGroup((prev) => recursiveAdd(prev));
+  };
 
+  const removeNode = (nodeId) => {
+    const recursiveRemove = (node) => {
+      if (!node.children) return node;
+      return {
+        ...node,
+        children: node.children
+          .filter(child => child.id !== nodeId)
+          .map(recursiveRemove)
+      };
+    };
+    setRootGroup((prev) => recursiveRemove(prev));
+  };
+
+  // Main search execution
   async function handleAdvancedSearch() {
+    await executeSearch(searchQuery, rootGroup);
+  }
+
+  async function executeSearch(textQuery, groupState) {
     setLoading(true);
     setError(null);
     setHasSearched(true);
 
-    const properties = advancedConditions
-      .filter((condition) => condition.propertyId && condition.value?.trim())
-      .map((condition) => ({
-        propertyId: condition.propertyId,
-        value: condition.value,
-        matchMode: condition.matchMode || "contains",
-      }));
+    const buildSchema = (group) => {
+      const properties = group.children
+        .filter(c => c.type === 'condition' && c.propertyId)
+        .map(c => ({
+          propertyId: c.propertyId,
+          value: c.value,
+          matchMode: c.matchMode || "equal"
+        }));
 
-    const schema = {
-      text: advancedText,
-      properties,
-      logic,
+      const groups = group.children
+        .filter(c => c.type === 'group')
+        .map(buildSchema);
+
+      return {
+        logic: group.logic,
+        properties,
+        groups
+      };
     };
 
+    const rootSchema = buildSchema(groupState);
+    const schema = {
+      text: textQuery,
+      ...rootSchema
+    };
+
+    // Update summary
     const summaryParts = [];
-    if (advancedText?.trim()) summaryParts.push(`texto: "${advancedText.trim()}"`);
-    if (properties.length > 0) {
-      summaryParts.push(`${properties.length} condición${properties.length !== 1 ? "es" : ""} (${logic})`);
+    if (textQuery?.trim()) summaryParts.push(`search("${textQuery.trim()}")`);
+
+    const countConditions = (g) => g.children.length + g.children.filter(c => c.type === 'group').reduce((acc, child) => acc + countConditions(child), 0);
+    const totalFilters = countConditions(groupState);
+
+    if (totalFilters > 0) {
+      summaryParts.push(`+ ${totalFilters} filtros`);
     }
-    setSearchSummary(summaryParts.length > 0 ? summaryParts.join(" · ") : "Búsqueda avanzada");
+    setSearchSummary(summaryParts.join(" "));
 
     try {
-      // Use the schema search directly
       const result = await searchEntitiesBySchema(schema, 50);
       setResults(result || []);
     } catch (err) {
@@ -132,144 +204,46 @@ function SearchContent() {
         </p>
       </header>
 
-      <section className="search-section">
-        <SearchBar
-          onSearch={handleSearch}
-          placeholder="Escribe tu búsqueda..."
-          initialQuery={searchQuery}
-          onQueryChange={(value) => setSearchQuery(value)}
-        />
-        <div className="advanced-toggle">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowAdvanced((prev) => !prev)}
-          >
-            {showAdvanced ? "Ocultar opciones avanzadas" : "Mostrar opciones avanzadas"}
-          </button>
-        </div>
-      </section>
-
-      {showAdvanced && (
-        <section className="advanced-section">
-          <h2 className="section-title">Configuración de búsqueda</h2>
-
-          <div className="advanced-grid">
-            <div className="form-group">
-              <label>Texto (label, descripción o alias)</label>
+      <section className="search-interface">
+        <div className="query-builder">
+          {/* Main Search Row */}
+          <div className="query-row primary-search-row">
+            <div className="query-logic-label search-badge">SEARCH</div>
+            <div className="query-content">
               <input
                 type="text"
-                value={advancedText}
-                onChange={(e) => setAdvancedText(e.target.value)}
-                placeholder="Ej: Municipalidad"
-                className="form-input"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAdvancedSearch()}
+                placeholder="Buscar por texto (label, descripción...)"
+                className="query-input main-query-input"
               />
             </div>
-          </div>
-
-          <div className="advanced-conditions">
-            <div className="conditions-header">
-              <div className="conditions-title-group">
-                <h3>Condiciones por Propiedad</h3>
-                <div className="logic-toggle">
-                  <span className="logic-label">Lógica:</span>
-                  <div className="btn-group">
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${logic === "AND" ? "btn-primary" : "btn-outline"}`}
-                      onClick={() => setLogic("AND")}
-                    >
-                      AND (Todas)
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${logic === "OR" ? "btn-primary" : "btn-outline"}`}
-                      onClick={() => setLogic("OR")}
-                    >
-                      OR (Alguna)
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <div className="query-actions-inline">
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={addAdvancedCondition}
+                className="btn-primary btn-search-action"
+                onClick={handleAdvancedSearch}
+                disabled={loading}
               >
-                + Añadir condición
+                {loading ? "..." : "Buscar"}
               </button>
             </div>
-
-            {advancedConditions.length === 0 ? (
-              <div className="conditions-empty">
-                Agrega condiciones para filtrar por propiedades específicas.
-              </div>
-            ) : (
-              <div className="conditions-list">
-                {advancedConditions.map((condition, index) => (
-                  <div key={condition.id} className="condition-row">
-                    {index > 0 && (
-                      <span className={`condition-pill ${logic.toLowerCase()}`}>
-                        {logic}
-                      </span>
-                    )}
-                    <div className="condition-field property-field">
-                      <label>Propiedad</label>
-                      <EntitySelector
-                        value={condition.propertyId}
-                        onChange={(value) => updateAdvancedCondition(condition.id, { propertyId: value })}
-                        placeholder="Buscar propiedad..."
-                        className="condition-selector"
-                      />
-                    </div>
-                    <div className="condition-field operator-field">
-                      <label>Operador</label>
-                      <select
-                        value={condition.matchMode || "contains"}
-                        onChange={(e) => updateAdvancedCondition(condition.id, { matchMode: e.target.value })}
-                        className="form-select"
-                      >
-                        <option value="contains">Contiene</option>
-                        <option value="equal">Igual</option>
-                      </select>
-                    </div>
-                    <div className="condition-field value-field">
-                      <label>Valor</label>
-                      <input
-                        type="text"
-                        value={condition.value}
-                        onChange={(e) => updateAdvancedCondition(condition.id, { value: e.target.value })}
-                        placeholder="Valor a buscar"
-                        disabled={!condition.propertyId}
-                        className="form-input"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="btn-remove-condition"
-                      onClick={() => removeAdvancedCondition(condition.id)}
-                      title="Eliminar condición"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
-          <div className="advanced-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleAdvancedSearch}
-              disabled={loading}
-            >
-              {loading ? "Buscando..." : "Ejecutar Búsqueda Avanzada"}
-            </button>
+          {/* Root Group */}
+          <div className="conditions-container root-container">
+            <QueryGroup
+              group={rootGroup}
+              onUpdate={updateNode}
+              onAddCondition={addCondition}
+              onAddGroup={addGroup}
+              onRemove={removeNode}
+              isRoot={true}
+            />
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       <section className="results-section">
         {loading ? (
@@ -303,5 +277,125 @@ function SearchContent() {
         )}
       </section>
     </>
+  );
+}
+
+function QueryGroup({ group, onUpdate, onAddCondition, onAddGroup, onRemove, isRoot }) {
+  return (
+    <div className={`query-group ${!isRoot ? "nested-group" : ""}`}>
+      {!isRoot && <div className="group-connector-line"></div>}
+
+      <div className="group-header">
+        <div className="query-logic-connector">
+          <select
+            className="logic-select"
+            value={group.logic}
+            onChange={(e) => onUpdate(group.id, { logic: e.target.value })}
+          >
+            <option value="AND">AND</option>
+            <option value="OR">OR</option>
+          </select>
+        </div>
+
+        <div className="group-actions">
+          <button
+            type="button"
+            className="btn-icon-action btn-sm"
+            onClick={() => onAddCondition(group.id)}
+          >
+            + Filtro
+          </button>
+          <button
+            type="button"
+            className="btn-icon-action btn-sm"
+            onClick={() => onAddGroup(group.id)}
+          >
+            + Grupo
+          </button>
+          {!isRoot && (
+            <button
+              type="button"
+              className="btn-remove-condition"
+              onClick={() => onRemove(group.id)}
+              title="Eliminar grupo"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="group-children">
+        {group.children.map((child) => (
+          child.type === "group" ? (
+            <QueryGroup
+              key={child.id}
+              group={child}
+              onUpdate={onUpdate}
+              onAddCondition={onAddCondition}
+              onAddGroup={onAddGroup}
+              onRemove={onRemove}
+              isRoot={false}
+            />
+          ) : (
+            <QueryCondition
+              key={child.id}
+              condition={child}
+              onUpdate={onUpdate}
+              onRemove={onRemove}
+            />
+          )
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QueryCondition({ condition, onUpdate, onRemove }) {
+  return (
+    <div className="query-row condition-row">
+      <div className="condition-connector-line"></div>
+      <div className="query-content condition-grid">
+        <div className="field-col">
+          <EntitySelector
+            value={condition.propertyId}
+            onChange={(value) => onUpdate(condition.id, { propertyId: value })}
+            placeholder="Atributo"
+            className="attribute-selector"
+          />
+        </div>
+
+        <div className="operator-col">
+          <select
+            value={condition.matchMode || "equal"}
+            onChange={(e) => onUpdate(condition.id, { matchMode: e.target.value })}
+            className="operator-select"
+          >
+            {OPERATORS.map(op => (
+              <option key={op.value} value={op.value}>{op.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="value-col">
+          <input
+            type="text"
+            value={condition.value}
+            onChange={(e) => onUpdate(condition.id, { value: e.target.value })}
+            placeholder="Valor"
+            className="value-input"
+          />
+        </div>
+
+        <button
+          type="button"
+          className="btn-remove-condition"
+          onClick={() => onRemove(condition.id)}
+          title="Eliminar filtro"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
   );
 }
