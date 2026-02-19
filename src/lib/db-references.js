@@ -13,12 +13,13 @@ import { runWithTransaction, createAuditEntry, wrapTransactionResult } from "./d
  * @returns {Promise<Array>}
  */
 export async function getReferencesByEntityRole(entityId, options = {}) {
-  const { filters = {}, page = 1, pageSize = 10 } = options;
+  const { filters = {}, limit = 10, offset = 0 } = options;
   const queries = [
     Query.equal("reference", entityId),
     Query.select(["*", "claim.*", "reference.*"]),
-    Query.offset((page - 1) * pageSize),
-    Query.limit(pageSize),
+    Query.limit(limit),
+    Query.offset(offset),
+    Query.orderDesc("$createdAt"), // Assuming we want recent references first
   ];
 
   if (filters.claim) {
@@ -32,7 +33,10 @@ export async function getReferencesByEntityRole(entityId, options = {}) {
     queries,
   });
 
-  return result.rows;
+  return {
+    references: result.rows,
+    total: result.total,
+  };
 }
 
 /**

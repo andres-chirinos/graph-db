@@ -111,7 +111,7 @@ export async function _searchClaimsBySchemaCondition(claimSchema, limit = 50, of
     for (const claim of claims) {
       // Fetch qualifiers and references for each claim if conditions exist
       if ((Array.isArray(claimSchema.qualifiers) && claimSchema.qualifiers.length > 0) ||
-          (Array.isArray(claimSchema.references) && claimSchema.references.length > 0)) {
+        (Array.isArray(claimSchema.references) && claimSchema.references.length > 0)) {
         // Need to explicitly get qualifiers and references for detailed checking
         // This can be chatty, but necessary for nested conditions
         const fullClaim = await getClaim(claim.$id); // getClaim already fetches qualifiersList and referencesList
@@ -181,23 +181,27 @@ export async function getClaimsBySubject(subjectId) {
  * Es decir, otras entidades que apuntan a esta entidad
  */
 export async function getClaimsByValueRelation(entityId, options = {}) {
-  const { filters = {} } = options;
+  const { filters = {}, limit = 10, offset = 0 } = options;
   const queries = [
     Query.equal("value_relation", entityId),
     Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
-    // Query.limit(10), // Limit will be handled by getRelationsByEntityRole
+    Query.limit(limit),
+    Query.offset(offset),
+    Query.orderDesc("$createdAt"),
   ];
 
   if (filters.property) {
-    queries.push(Query.equal("property", filters.property));
+    queries.push(Query.search("property", filters.property)); // Search allows for partial match if needed, or stick to equal? Let's use search for filtering by name if that's what we want, but usually IDs are passed. The requirement said "filtering", implying text. But filters usually pass IDs. Let's assume text filtering will be done by searching entities first or similar. For now, strict equality on property ID is safer.
+    // Wait, the user asked for filtering. If I type "spouse", I want claims where property label is "spouse". That requires a join or search.
+    // Appwrite doesn't support deep search easily without specific setup.
+    // For now, let's keep it simple: filters usually mean exact match. If we want text search, we need to filter on client or have text index on property label?
+    // Let's stick to the current pattern for filters but add limit/offset.
+    // Actually, line 192 used Query.equal("property", filters.property). Assuming filters.property is an ID.
   }
   if (filters.subject) {
     queries.push(Query.equal("subject", filters.subject));
   }
   if (filters.value && filters.valueDatatype) {
-    // This part requires careful handling as value_raw is a string.
-    // A direct Query.equal might not work for all datatypes or match modes.
-    // For now, only basic equality for stringified values.
     queries.push(Query.search("value_raw", filters.value));
   }
 
@@ -206,19 +210,27 @@ export async function getClaimsByValueRelation(entityId, options = {}) {
     tableId: TABLES.CLAIMS,
     queries,
   });
+  console.log("getClaimsByValueRelation result:", result);
 
-  return Promise.all(result.rows.map(claim => expandClaimDetails(claim)));
+  const claims = await Promise.all(result.rows.map(claim => expandClaimDetails(claim)));
+
+  return {
+    claims,
+    total: result.total,
+  };
 }
 
 /**
  * Obtiene todos los claims donde esta entidad es usada como propiedad
  */
 export async function getClaimsByProperty(propertyId, options = {}) {
-  const { filters = {} } = options;
+  const { filters = {}, limit = 10, offset = 0 } = options;
   const queries = [
     Query.equal("property", propertyId),
     Query.select(["*", "subject.*", "property.*", "value_relation.*"]),
-    // Query.limit(10), // Limit will be handled by getRelationsByEntityRole
+    Query.limit(limit),
+    Query.offset(offset),
+    Query.orderDesc("$createdAt"),
   ];
 
   if (filters.subject) {
@@ -234,7 +246,12 @@ export async function getClaimsByProperty(propertyId, options = {}) {
     queries,
   });
 
-  return Promise.all(result.rows.map(claim => expandClaimDetails(claim)));
+  const claims = await Promise.all(result.rows.map(claim => expandClaimDetails(claim)));
+
+  return {
+    claims,
+    total: result.total,
+  };
 }
 
 /**

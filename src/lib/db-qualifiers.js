@@ -2,26 +2,35 @@ import { tablesDB, Query } from "./appwrite";
 import { DATABASE_ID, TABLES, generatePermissions, normalizeText, stringifyClaimValue, ClaimSchema } from "./db-core";
 import { runWithTransaction, createAuditEntry, wrapTransactionResult } from "./db-audit";
 // getClaim will be defined in db-claims.js, for now it's a placeholder
-import { getClaim } from "./db-claims";
+// getClaim import removed to avoid circular dependency and because it is unused
 
 // ============================================
 // QUALIFIERS
 // ============================================
 
 export async function getQualifiersByEntityRole(entityId, options = {}) {
-  const { filters = {}, page = 1, pageSize = 10 } = options;
-  const queries = [
-    Query.or([
-      Query.equal("property", entityId),
-      Query.equal("value_relation", entityId),
-    ]),
+  const { filters = {}, limit = 10, offset = 0, role } = options;
+
+  let queries = [
     Query.select(["*", "claim.*", "property.*", "value_relation.*"]),
-    Query.offset((page - 1) * pageSize),
-    Query.limit(pageSize),
+    Query.offset(offset),
+    Query.limit(limit),
+    Query.orderDesc("$createdAt"),
   ];
 
+  if (role === "property") {
+    queries.push(Query.equal("property", entityId));
+  } else if (role === "value") {
+    queries.push(Query.equal("value_relation", entityId));
+  } else {
+    // Fallback: any role (OR query might be tricky with other filters in some DBs, but Appwrite supports it)
+    queries.push(Query.or([
+      Query.equal("property", entityId),
+      Query.equal("value_relation", entityId),
+    ]));
+  }
+
   if (filters.property) {
-    // This filter applies to the property of the qualifier itself
     queries.push(Query.equal("property", filters.property));
   }
 
@@ -31,7 +40,10 @@ export async function getQualifiersByEntityRole(entityId, options = {}) {
     queries,
   });
 
-  return result.rows;
+  return {
+    qualifiers: result.rows,
+    total: result.total,
+  };
 }
 
 /**

@@ -94,6 +94,35 @@ export const stringifyClaimValue = (rawValue) => {
 };
 
 /**
+ * Parsea un value_raw desde JSON string
+ */
+export function parseValueRaw(valueRaw, datatype = "string") {
+  if (valueRaw === null || valueRaw === undefined) return null;
+
+  let data = valueRaw;
+  if (typeof valueRaw === "string" && ["json", "object", "array"].includes(datatype)) {
+    try {
+      data = JSON.parse(valueRaw);
+    } catch {
+      data = valueRaw;
+    }
+  }
+
+  return { datatype, data };
+}
+
+/**
+ * Serializa un value para guardarlo como value_raw
+ */
+export function serializeValue(value) {
+  if (!value) return null;
+  if (typeof value === "object" && value.datatype !== undefined && value.data !== undefined) {
+    return { datatype: value.datatype, value_raw: value.data };
+  }
+  return { datatype: "string", value_raw: value };
+}
+
+/**
  * @typedef {Object} PropertyCondition
  * @property {string} propertyId - The ID of the property.
  * @property {string} value - The value to match (raw text).
