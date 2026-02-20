@@ -16,10 +16,6 @@ export default function Footer() {
                         <span className="icon-activity" aria-hidden="true"></span>
                         <span>Estadísticas</span>
                     </Link>
-                    <Link href="/graphql" className="nav-link flex items-center gap-2 hover:text-blue-600 transition-colors">
-                        <span className="icon-code" aria-hidden="true"></span>
-                        <span>GraphQL</span>
-                    </Link>
                     <Link href="/import" className="nav-link flex items-center gap-2 hover:text-blue-600 transition-colors">
                         <span className="icon-code" aria-hidden="true"></span>
                         <span>Importar</span>
