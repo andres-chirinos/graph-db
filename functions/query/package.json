@@ -1,0 +1,9 @@
+{
+    "name": "query-function",
+    "version": "1.0.0",
+    "private": true,
+    "main": "index.js",
+    "dependencies": {
+        "node-appwrite": "^14.0.0"
+    }
+}
