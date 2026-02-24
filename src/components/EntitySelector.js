@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { searchEntities } from "@/lib/database";
+import HighlightText from "./HighlightText";
 
 /**
  * Selector de entidades con búsqueda
@@ -320,18 +321,18 @@ export default function EntitySelector({
                         >
                           <div className="result-header">
                             <span className="result-label">
-                              {entity.label || "(Sin etiqueta)"}
+                              {entity.label ? <HighlightText text={entity.label} query={searchTerm} /> : "(Sin etiqueta)"}
                             </span>
                             <span className="result-id">#{entity.$id}</span>
                           </div>
                           {entity.description && (
                             <span className="result-description">
-                              {entity.description}
+                              <HighlightText text={entity.description} query={searchTerm} />
                             </span>
                           )}
                           {entity.aliases && entity.aliases.length > 0 && (
                             <span className="result-aliases">
-                              Alias: {entity.aliases.join(", ")}
+                              Alias: <HighlightText text={entity.aliases.join(", ")} query={searchTerm} />
                             </span>
                           )}
                         </button>

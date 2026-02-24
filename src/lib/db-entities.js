@@ -26,9 +26,48 @@ export async function getEntity(entityId, includeRelations = true) {
   return result;
 }
 
+/**
+ * Analiza un término de búsqueda para extraer operadores estilo Google
+ */
+export function parseSearchQuery(query) {
+  const result = {
+    exactPhrases: [],
+    excludedTerms: [],
+    optionalTerms: [],
+    rawText: query || ""
+  };
+
+  if (!query) return result;
+
+  // 1. Extraer frases exactas entre comillas
+  const exactRegex = /"([^"]+)"/g;
+  let match;
+  let remainingQuery = query;
+
+  while ((match = exactRegex.exec(query)) !== null) {
+    if (match[1].trim()) {
+      result.exactPhrases.push(normalizeText(match[1]));
+    }
+    remainingQuery = remainingQuery.replace(match[0], ' ');
+  }
+
+  // 2. Extraer términos con exclusión (-) y normales
+  const tokens = remainingQuery.split(/\s+/).filter(Boolean);
+
+  for (const token of tokens) {
+    if (token.startsWith('-') && token.length > 1) {
+      result.excludedTerms.push(normalizeText(token.substring(1)));
+    } else {
+      const norm = normalizeText(token);
+      if (norm) result.optionalTerms.push(norm);
+    }
+  }
+
+  return result;
+}
+
 // Helper to calculate relevance score
-function calculateRelevance(entity, term) {
-  const normTerm = normalizeText(term);
+function calculateRelevance(entity, parsedQuery) {
   const normLabel = normalizeText(entity.label);
   const normDesc = normalizeText(entity.description);
   const normAliases = (entity.aliases || []).map(a => normalizeText(a));
@@ -36,20 +75,41 @@ function calculateRelevance(entity, term) {
 
   let score = 0;
 
-  // Exact matches (Highest priority)
-  if (normLabel === normTerm) score += 100;
-  if (normAliases.includes(normTerm)) score += 90;
-  if (normId === normTerm) score += 80;
+  const query = typeof parsedQuery === 'string' ? parseSearchQuery(parsedQuery) : parsedQuery;
+  const allTerms = [...query.exactPhrases, ...query.optionalTerms];
+  const fullOriginalText = normalizeText(query.rawText);
 
-  // Starts with (High priority)
-  if (normLabel.startsWith(normTerm)) score += 60;
-  if (normAliases.some(a => a.startsWith(normTerm))) score += 50;
+  // Exact matches of the FULL query (Highest priority)
+  if (normLabel === fullOriginalText) score += 1000;
+  if (normAliases.includes(fullOriginalText)) score += 900;
+  if (normId === fullOriginalText) score += 800;
 
-  // Contains (Medium priority)
-  if (normLabel.includes(normTerm)) score += 40;
-  if (normAliases.some(a => a.includes(normTerm))) score += 30;
-  if (normDesc.includes(normTerm)) score += 20;
-  if (normId.includes(normTerm)) score += 10;
+  // Starts with the full query
+  if (normLabel.startsWith(fullOriginalText)) score += 600;
+  if (normAliases.some(a => a.startsWith(fullOriginalText))) score += 500;
+
+  // For each individual term
+  for (const term of allTerms) {
+    if (normLabel === term) score += 100;
+    else if (normLabel.startsWith(term)) score += 80;
+    else if (normLabel.includes(term)) score += 50;
+
+    if (normAliases.includes(term)) score += 90;
+    else if (normAliases.some(a => a.startsWith(term))) score += 70;
+    else if (normAliases.some(a => a.includes(term))) score += 40;
+
+    if (normDesc.includes(term)) score += 20;
+
+    if (normId === term) score += 100;
+    else if (normId.includes(term)) score += 10;
+  }
+
+  // Check exclusions penalty
+  for (const term of query.excludedTerms) {
+    if (normLabel.includes(term) || normDesc.includes(term) || normAliases.some(a => a.includes(term))) {
+      score -= 5000; // Gran penalidad para filtrarlo luego
+    }
+  }
 
   return score;
 }
@@ -58,38 +118,29 @@ function calculateRelevance(entity, term) {
  * Busca entidades por texto (label, description, aliases)
  */
 export async function searchEntities(searchTerm, limit = 20, offset = 0) {
-  let rawTerm = (searchTerm || "").trim();
-  let isExactMatch = false;
+  const parsedQuery = parseSearchQuery(searchTerm);
+  const { exactPhrases, optionalTerms } = parsedQuery;
+  const allRequiredTerms = [...exactPhrases, ...optionalTerms];
 
-  if (rawTerm.startsWith('"') && rawTerm.endsWith('"') && rawTerm.length > 2) {
-    isExactMatch = true;
-    rawTerm = rawTerm.slice(1, -1).trim();
-  }
-
-  const term = normalizeText(rawTerm);
   const queries = [
-    Query.limit(limit),
+    Query.limit(limit * 3), // Fetch more to allow JS filtering of exclusions
     Query.offset(offset),
   ];
 
-  if (searchTerm) {
-    if (isExactMatch) {
-      // Búsqueda exacta (frase exacta o igualdad)
-      queries.push(Query.or([
-        Query.equal("label", rawTerm),
-        Query.contains("label", rawTerm),
-        Query.contains("aliases", rawTerm),
-        Query.equal("$id", rawTerm)
-      ]));
+  if (searchTerm && searchTerm.trim()) {
+    if (allRequiredTerms.length > 0) {
+      for (const term of allRequiredTerms) {
+        queries.push(Query.or([
+          Query.search("label", term),
+          Query.search("description", term),
+          Query.contains("aliases", term),
+          Query.contains("label", term),
+          Query.equal("$id", term)
+        ]));
+      }
     } else {
-      // Búsqueda flexible
-      queries.push(Query.or([
-        Query.search("label", term),
-        Query.search("description", term),
-        Query.contains("aliases", term),
-        Query.contains("label", term),
-        Query.equal("$id", rawTerm),
-      ]));
+      // Si solo hay exclusiones, buscar todo y filtrar
+      queries.push(Query.orderDesc("$createdAt"));
     }
   } else {
     queries.push(Query.orderDesc("$createdAt"));
@@ -102,11 +153,15 @@ export async function searchEntities(searchTerm, limit = 20, offset = 0) {
   });
 
   if (searchTerm && result.rows.length > 0) {
-    result.rows.sort((a, b) => {
-      const scoreA = calculateRelevance(a, rawTerm);
-      const scoreB = calculateRelevance(b, rawTerm);
-      return scoreB - scoreA;
-    });
+    let filteredRows = result.rows.map(row => ({
+      ...row,
+      _score: calculateRelevance(row, parsedQuery)
+    })).filter(row => row._score >= 0); // Excluidos tendrán score negativo
+
+    filteredRows.sort((a, b) => b._score - a._score);
+
+    result.rows = filteredRows.slice(0, limit);
+    result.total = filteredRows.length; // Approximate count because of local filtering
   }
 
   return result;
@@ -696,7 +751,7 @@ export async function deleteEntity(entityId) {
     const claims = await getClaimsBySubject(entityId);
 
     // Eliminar cada claim con sus relaciones dentro de la misma transacción
-    for (const claim of claims) {
+    /*for (const claim of claims) {
       const qualifiers = await getQualifiersByClaim(claim.$id);
       for (const qualifier of qualifiers) {
         await tablesDB.deleteRow({
@@ -726,7 +781,7 @@ export async function deleteEntity(entityId) {
         transactionId,
       });
       changes.push({ action: "delete", table: TABLES.CLAIMS, rowId: claim.$id });
-    }
+    }*/
 
     // Finalmente eliminar la entidad
     const result = await tablesDB.deleteRow({

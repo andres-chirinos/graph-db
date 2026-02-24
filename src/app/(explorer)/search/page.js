@@ -270,7 +270,7 @@ function SearchContent() {
             </div>
             <div className="entities-list">
               {results.map((entity) => (
-                <EntityCard key={entity.$id} entity={entity} />
+                <EntityCard key={entity.$id} entity={entity} highlightQuery={searchQuery} />
               ))}
             </div>
           </>
