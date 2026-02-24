@@ -208,7 +208,6 @@ function SearchContent() {
         <div className="query-builder">
           {/* Main Search Row */}
           <div className="query-row primary-search-row">
-            <div className="query-logic-label search-badge">SEARCH</div>
             <div className="query-content">
               <input
                 type="text"
