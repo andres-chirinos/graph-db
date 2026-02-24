@@ -179,66 +179,54 @@ async function importRows(databases, config, rows, log) {
     };
 
     if (useBatch) {
-        // Batch mode using createDocuments
+        // Batch mode: concurrent inserts in chunks using Promise.allSettled
         for (let i = 0; i < rows.length; i += batchSize) {
             const chunk = rows.slice(i, i + batchSize);
-            const documents = chunk.map((row, idx) => {
+            const promises = chunk.map((row, idx) => {
                 try {
                     const data = mapRow(row, fields, targetCollection);
-                    return {
-                        $id: sdk.ID.unique(),
-                        data,
-                    };
+                    return databases.createDocument(
+                        DATABASE_ID,
+                        targetCollection,
+                        sdk.ID.unique(),
+                        data
+                    ).then(() => ({ success: true, rowIndex: i + idx }));
                 } catch (err) {
-                    results.errors.push({ row: i + idx + 1, error: err.message });
-                    return null;
+                    return Promise.resolve({ success: false, rowIndex: i + idx, error: err.message });
                 }
-            }).filter(Boolean);
+            });
 
-            if (documents.length === 0) continue;
+            const settled = await Promise.allSettled(promises);
 
-            try {
-                await databases.createDocuments({
-                    databaseId: DATABASE_ID,
-                    collectionId: targetCollection,
-                    documents,
-                });
-                results.created += documents.length;
-                log(`Batch ${Math.floor(i / batchSize) + 1}: created ${documents.length} documents`);
-            } catch (err) {
-                // If batch fails, try one by one
-                log(`Batch failed, falling back to individual inserts: ${err.message}`);
-                for (let j = 0; j < documents.length; j++) {
-                    try {
-                        await databases.createDocument({
-                            databaseId: DATABASE_ID,
-                            collectionId: targetCollection,
-                            documentId: documents[j].$id,
-                            data: documents[j].data,
-                        });
-                        results.created++;
-                    } catch (innerErr) {
-                        results.errors.push({
-                            row: i + j + 1,
-                            error: innerErr.message,
-                            data: documents[j].data,
-                        });
-                    }
+            for (const result of settled) {
+                if (result.status === 'fulfilled' && result.value.success) {
+                    results.created++;
+                } else {
+                    const err = result.status === 'rejected'
+                        ? result.reason?.message || String(result.reason)
+                        : result.value?.error || 'Unknown error';
+                    const rowIdx = result.status === 'fulfilled' ? result.value.rowIndex : -1;
+                    results.errors.push({
+                        row: rowIdx + 1,
+                        error: err,
+                    });
                 }
             }
+
+            log(`Batch ${Math.floor(i / batchSize) + 1}: processed ${chunk.length} rows`);
         }
     } else {
-        // Row-by-row mode
+        // Row-by-row mode (sequential)
         for (let i = 0; i < rows.length; i++) {
             try {
                 const data = mapRow(rows[i], fields, targetCollection);
 
-                await databases.createDocument({
-                    databaseId: DATABASE_ID,
-                    collectionId: targetCollection,
-                    documentId: sdk.ID.unique(),
-                    data,
-                });
+                await databases.createDocument(
+                    DATABASE_ID,
+                    targetCollection,
+                    sdk.ID.unique(),
+                    data
+                );
 
                 results.created++;
 
