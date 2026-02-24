@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import UserMenu from "./UserMenu";
 import AuthModal from "./AuthModal";
 import EntitySelector from "./EntitySelector";
+import EntityForm from "./EntityForm";
 import { useAuth } from "@/context/AuthContext";
+import { createEntity } from "@/lib/database";
 import "./Navigation.css";
 
 /**
@@ -14,9 +16,17 @@ import "./Navigation.css";
  */
 export default function Navigation() {
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showEntityForm, setShowEntityForm] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const router = useRouter();
   const { isAdmin, isAuthenticated } = useAuth();
+
+  async function handleCreateEntity(data) {
+    const newEntity = await createEntity(data);
+    router.push(`/entity/${newEntity.$id}`);
+    setShowEntityForm(false);
+    setShowMobileMenu(false);
+  }
 
   function handleEntitySelect(entityId) {
     if (entityId) {
@@ -87,6 +97,16 @@ export default function Navigation() {
                 <span className="icon-list"></span>
                 <span>Entidades</span>
               </Link>
+              {isAuthenticated && (
+                <button
+                  className="nav-link"
+                  onClick={() => { setShowEntityForm(true); setShowMobileMenu(false); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit', color: 'inherit' }}
+                >
+                  <span className="icon-plus"></span>
+                  <span>Crear Entidad</span>
+                </button>
+              )}
             </div>
 
             <div className="nav-search">
@@ -114,6 +134,11 @@ export default function Navigation() {
       <AuthModal
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
+      />
+      <EntityForm
+        isOpen={showEntityForm}
+        onClose={() => setShowEntityForm(false)}
+        onSave={handleCreateEntity}
       />
     </>
   );
