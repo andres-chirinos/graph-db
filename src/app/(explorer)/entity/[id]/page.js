@@ -27,6 +27,9 @@ import {
   getQualifiersByEntityRole,
   getClaimsBySubject,
   getClaimPropertiesSummary,
+  subscribeToDocument,
+  subscribeToCollection,
+  TABLES
 } from "@/lib/database";
 import "./page.css";
 
@@ -119,6 +122,7 @@ export default function EntityPage({ params }) {
     }
   }, [claimsPage]);
 
+  const requirePropertyLoadRef = require("react").useRef();
   async function handleRequirePropertyLoad(propertyId) {
     try {
       const result = await getClaimsBySubject(id, {
@@ -136,6 +140,105 @@ export default function EntityPage({ params }) {
       console.error("Error cargando propiedad específica:", err);
     }
   }
+
+  requirePropertyLoadRef.current = handleRequirePropertyLoad;
+
+  // Real-time integration
+  useEffect(() => {
+    if (!id || !entity) return;
+
+    const unsubscribeEntity = subscribeToDocument(TABLES.ENTITIES, id, (response) => {
+      if (response.events.some(e => e.includes('.update'))) {
+        setEntity(prev => ({ ...prev, ...response.payload }));
+      } else if (response.events.some(e => e.includes('.delete'))) {
+        router.push("/entities");
+      }
+    });
+
+    const unsubscribeClaims = subscribeToCollection(TABLES.CLAIMS, async (response) => {
+      const claimPayload = response.payload;
+      const claimSubjectId = typeof claimPayload.subject === 'object' ? claimPayload.subject?.$id : claimPayload.subject;
+
+      console.log("[Realtime Claims] Event:", response.events[0], "| Subject:", claimSubjectId, "| Target:", id);
+
+      if (claimSubjectId === id) {
+        if (response.events.some(e => e.includes('.delete'))) {
+          setClaims(prev => prev.filter(c => c.$id !== claimPayload.$id));
+          setClaimsTotal(prev => prev > 0 ? prev - 1 : 0);
+        } else if (response.events.some(e => e.includes('.create') || e.includes('.update'))) {
+          try {
+            const updatedClaim = await getClaim(claimPayload.$id);
+            if (updatedClaim) {
+              setClaims(prev => {
+                const exists = prev.some(c => c.$id === updatedClaim.$id);
+                if (exists) {
+                  return prev.map(c => c.$id === updatedClaim.$id ? updatedClaim : c);
+                } else {
+                  return [updatedClaim, ...prev];
+                }
+              });
+
+              if (response.events.some(e => e.includes('.create'))) {
+                setClaimsTotal(t => t + 1);
+
+                // Actualizar el resumen de propiedades sumando 1
+                const propId = updatedClaim.property?.$id;
+                if (propId) {
+                  setClaimPropertiesSummary(prev => {
+                    const next = { ...(prev || {}) };
+                    if (next[propId]) {
+                      next[propId] = { ...next[propId], count: next[propId].count + 1 };
+                    } else {
+                      next[propId] = { property: updatedClaim.property, count: 1 };
+                    }
+                    return next;
+                  });
+                }
+              }
+            }
+          } catch (err) {
+            console.error("Error al recargar claim en tiempo real:", err);
+          }
+        }
+      }
+    });
+
+    const handleSubRelationUpdate = async (response) => {
+      const payload = response.payload;
+      const claimId = typeof payload.claim === 'object' ? payload.claim?.$id : payload.claim;
+
+      console.log(`[Realtime SubRelation] Event: ${response.events[0]}, Claim ID: ${claimId}`);
+
+      if (claimId) {
+        try {
+          // Primero pedimos el claim modificado directo a la DB
+          const updatedClaim = await getClaim(claimId);
+
+          if (updatedClaim) {
+            // Y luego lo inyectamos de forma segura comprobando que ya existía en la UI
+            setClaims(prev => {
+              if (prev.some(c => c.$id === claimId)) {
+                return prev.map(c => c.$id === claimId ? updatedClaim : c);
+              }
+              return prev;
+            });
+          }
+        } catch (e) {
+          console.error("Error recargando claim tras cambio en subrelacion:", e);
+        }
+      }
+    };
+
+    const unsubscribeQualifiers = subscribeToCollection(TABLES.QUALIFIERS, handleSubRelationUpdate);
+    const unsubscribeReferences = subscribeToCollection(TABLES.REFERENCES, handleSubRelationUpdate);
+
+    return () => {
+      unsubscribeEntity();
+      unsubscribeClaims();
+      unsubscribeQualifiers();
+      unsubscribeReferences();
+    };
+  }, [id, entity?.$id]);
 
   async function loadEntity() {
     setLoading(true);
