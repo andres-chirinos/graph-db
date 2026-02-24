@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import ValueRenderer from "./ValueRenderer";
-import QualifierForm from "./QualifierForm";
+import InlineClaimForm from "./InlineClaimForm";
 import { ConfirmModal } from "./EditModal";
 import PermissionsModal from "./PermissionsModal";
 import { updateQualifierPermissions } from "@/lib/database";
@@ -39,6 +39,7 @@ export default function QualifierItem({ qualifier, editable, onEdit, onDelete })
     const [showEditForm, setShowEditForm] = useState(false);
     const [showPermissions, setShowPermissions] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     const parsedValue = normalizeValue(value_raw, datatype || property?.datatype || "string");
 
@@ -56,66 +57,76 @@ export default function QualifierItem({ qualifier, editable, onEdit, onDelete })
 
     return (
         <div className="qualifier-item">
-            <span className="qualifier-property">
-                {property ? (
-                    <Link href={`/entity/${property.$id}`}>
-                        {property.label || property.$id}
-                    </Link>
-                ) : (
-                    "(Propiedad)"
-                )}
-            </span>
-            <span className="qualifier-value">
-                {value_relation ? (
-                    <Link href={`/entity/${value_relation.$id}`}>
-                        {value_relation.label || value_relation.$id}
-                    </Link>
-                ) : parsedValue ? (
-                    <ValueRenderer value={parsedValue} compact />
-                ) : (
-                    "(Sin valor)"
-                )}
-            </span>
+            {!showEditForm ? (
+                <>
+                    <span className="qualifier-property">
+                        {property ? (
+                            <Link href={`/entity/${property.$id}`}>
+                                {property.label || property.$id}
+                            </Link>
+                        ) : (
+                            "(Propiedad)"
+                        )}
+                    </span>
+                    <span className="qualifier-value">
+                        {value_relation ? (
+                            <Link href={`/entity/${value_relation.$id}`}>
+                                {value_relation.label || value_relation.$id}
+                            </Link>
+                        ) : parsedValue ? (
+                            <ValueRenderer value={parsedValue} compact />
+                        ) : (
+                            "(Sin valor)"
+                        )}
+                    </span>
 
-            {editable && (
-                <div className="qualifier-actions">
-                    <button
-                        type="button"
-                        className="btn-icon-sm btn-edit"
-                        onClick={() => setShowEditForm(true)}
-                        title="Editar calificador"
-                    >
-                        ✎
-                    </button>
-                    <button
-                        type="button"
-                        className="btn-icon-sm btn-edit"
-                        onClick={() => setShowPermissions(true)}
-                        title="Permisos"
-                    >
-                        🔐
-                    </button>
-                    <button
-                        type="button"
-                        className="btn-icon-sm btn-delete"
-                        onClick={() => setShowDeleteConfirm(true)}
-                        title="Eliminar calificador"
-                    >
-                        🗑
-                    </button>
+                    {editable && (
+                        <div className="qualifier-actions">
+                            <button
+                                type="button"
+                                className="btn-icon-sm btn-edit"
+                                onClick={() => setShowEditForm(true)}
+                                title="Editar calificador"
+                            >
+                                ✎
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-icon-sm btn-edit"
+                                onClick={() => setShowPermissions(true)}
+                                title="Permisos"
+                            >
+                                🔐
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-icon-sm btn-delete"
+                                onClick={() => setShowDeleteConfirm(true)}
+                                title="Eliminar calificador"
+                            >
+                                🗑
+                            </button>
+                        </div>
+                    )}
+                </>
+            ) : (
+                <div style={{ width: '100%' }}>
+                    <InlineClaimForm
+                        initialData={qualifier}
+                        loading={saving}
+                        onCancel={() => setShowEditForm(false)}
+                        onSave={async (data) => {
+                            setSaving(true);
+                            try {
+                                await onEdit?.(data, qualifier.$id, qualifier.claim);
+                                setShowEditForm(false);
+                            } finally {
+                                setSaving(false);
+                            }
+                        }}
+                        claimId={qualifier.claim}
+                    />
                 </div>
-            )}
-
-            {showEditForm && (
-                <QualifierForm
-                    isOpen={showEditForm}
-                    onClose={() => setShowEditForm(false)}
-                    onSave={async (data) => {
-                        await onEdit?.(data, qualifier.$id, qualifier.claim);
-                    }}
-                    qualifier={qualifier}
-                    claimId={qualifier.claim}
-                />
             )}
 
             <ConfirmModal

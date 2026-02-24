@@ -39,7 +39,9 @@ export default function EntitySelector({
   const isMounted = useRef(true);
 
   // Memoizar excludeIds para evitar re-renders infinitos
-  const excludeIdsKey = useMemo(() => excludeIds.join(","), [excludeIds]);
+  const excludeIdsKey = useMemo(() => {
+    return (excludeIds || []).map(id => typeof id === 'object' && id !== null ? (id.$id || id.id) : id).join(",");
+  }, [excludeIds]);
 
   // Cleanup al desmontar
   useEffect(() => {

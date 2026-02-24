@@ -149,10 +149,12 @@ export default function EntityPage({ params }) {
   async function handleCreateClaim(data) {
     const teamId = activeTeam?.$id || null;
     const newClaimRaw = await createClaim(data, teamId);
-    // Refresh claims list to show new claim at top or refresh current page
-    await loadClaims();
-    // const newClaim = await getClaim(newClaimRaw.$id); // Fetch fully expanded claim
-    // setClaims(prev => [...prev, newClaim]);
+
+    // Fetch fully expanded claim to get resolved property/entity data
+    const newClaim = await getClaim(newClaimRaw.$id);
+
+    setClaims(prev => [newClaim, ...prev]);
+    setClaimsTotal(prev => prev + 1);
   }
 
   async function handleUpdateClaim(data, claimId) {
@@ -198,12 +200,14 @@ export default function EntityPage({ params }) {
 
   async function handleUpdateReference(data, referenceId, claimId) {
     await updateReference(referenceId, data);
-    await loadEntity();
+    const updatedClaim = await getClaim(claimId);
+    setClaims(prev => prev.map(c => c.$id === claimId ? updatedClaim : c));
   }
 
-  async function handleDeleteReference(referenceId) {
+  async function handleDeleteReference(referenceId, claimId) {
     await deleteReference(referenceId);
-    await loadEntity();
+    const updatedClaim = await getClaim(claimId);
+    setClaims(prev => prev.map(c => c.$id === claimId ? updatedClaim : c));
   }
 
   if (loading || authLoading) {

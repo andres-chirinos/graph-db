@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import ReferenceForm from "./ReferenceForm";
+import InlineReferenceForm from "./InlineReferenceForm";
 import { ConfirmModal } from "./EditModal";
 import PermissionsModal from "./PermissionsModal";
 import { updateReferencePermissions } from "@/lib/database";
@@ -17,6 +17,7 @@ export default function ReferenceItem({ reference, editable, onEdit, onDelete })
     const [showEditForm, setShowEditForm] = useState(false);
     const [showPermissions, setShowPermissions] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     async function handleDelete() {
         setDeleting(true);
@@ -32,52 +33,62 @@ export default function ReferenceItem({ reference, editable, onEdit, onDelete })
 
     return (
         <div className="reference-item">
-            {refEntity && (
-                <Link href={`/entity/${refEntity.$id}`} className="reference-entity">
-                    {refEntity.label || refEntity.$id}
-                </Link>
-            )}
-            {details && <span className="reference-details">{details}</span>}
+            {!showEditForm ? (
+                <>
+                    {refEntity && (
+                        <Link href={`/entity/${refEntity.$id}`} className="reference-entity">
+                            {refEntity.label || refEntity.$id}
+                        </Link>
+                    )}
+                    {details && <span className="reference-details">{details}</span>}
 
-            {editable && (
-                <div className="reference-actions">
-                    <button
-                        type="button"
-                        className="btn-icon-sm btn-edit"
-                        onClick={() => setShowEditForm(true)}
-                        title="Editar referencia"
-                    >
-                        ✎
-                    </button>
-                    <button
-                        type="button"
-                        className="btn-icon-sm btn-edit"
-                        onClick={() => setShowPermissions(true)}
-                        title="Permisos"
-                    >
-                        🔐
-                    </button>
-                    <button
-                        type="button"
-                        className="btn-icon-sm btn-delete"
-                        onClick={() => setShowDeleteConfirm(true)}
-                        title="Eliminar referencia"
-                    >
-                        🗑
-                    </button>
+                    {editable && (
+                        <div className="reference-actions">
+                            <button
+                                type="button"
+                                className="btn-icon-sm btn-edit"
+                                onClick={() => setShowEditForm(true)}
+                                title="Editar referencia"
+                            >
+                                ✎
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-icon-sm btn-edit"
+                                onClick={() => setShowPermissions(true)}
+                                title="Permisos"
+                            >
+                                🔐
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-icon-sm btn-delete"
+                                onClick={() => setShowDeleteConfirm(true)}
+                                title="Eliminar referencia"
+                            >
+                                🗑
+                            </button>
+                        </div>
+                    )}
+                </>
+            ) : (
+                <div style={{ width: '100%' }}>
+                    <InlineReferenceForm
+                        initialData={reference}
+                        loading={saving}
+                        onCancel={() => setShowEditForm(false)}
+                        onSave={async (data) => {
+                            setSaving(true);
+                            try {
+                                await onEdit?.(data, reference.$id, reference.claim);
+                                setShowEditForm(false);
+                            } finally {
+                                setSaving(false);
+                            }
+                        }}
+                        claimId={reference.claim}
+                    />
                 </div>
-            )}
-
-            {showEditForm && (
-                <ReferenceForm
-                    isOpen={showEditForm}
-                    onClose={() => setShowEditForm(false)}
-                    onSave={async (data) => {
-                        await onEdit?.(data, reference.$id, reference.claim);
-                    }}
-                    reference={reference}
-                    claimId={reference.claim}
-                />
             )}
 
             <ConfirmModal

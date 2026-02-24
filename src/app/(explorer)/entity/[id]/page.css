@@ -312,6 +312,27 @@
     font-style: italic;
 }
 
+/* Action Buttons (Hover to reveal, right aligned) */
+.claim-actions,
+.qualifier-actions,
+.reference-actions {
+    display: flex;
+    gap: var(--spacing-xs, 0.25rem);
+    align-items: center;
+    justify-content: flex-end;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.claim-main:hover .claim-actions,
+.qualifier-item:hover .qualifier-actions,
+.reference-item:hover .reference-actions,
+.claim-actions:focus-within,
+.qualifier-actions:focus-within,
+.reference-actions:focus-within {
+    opacity: 1;
+}
+
 /* Qualifiers */
 .claim-qualifiers {
     margin-top: var(--spacing-sm, 0.5rem);
@@ -325,15 +346,23 @@
     font-size: 0.875rem;
     color: var(--color-text-secondary, #54595d);
     padding: var(--spacing-xs, 0.25rem) 0;
+    flex-wrap: wrap;
+    /* Allows inline forms to span full width */
+    align-items: center;
 }
 
 .qualifier-property {
     color: var(--color-text-muted, #72777d);
+    min-width: 150px;
 }
 
 .qualifier-property a {
     color: var(--color-accent, #36c);
     text-decoration: none;
+}
+
+.qualifier-value {
+    flex: 1;
 }
 
 .qualifier-value a {
@@ -375,15 +404,20 @@
     gap: var(--spacing-sm, 0.5rem);
     font-size: 0.875rem;
     padding: var(--spacing-xs, 0.25rem) 0;
+    flex-wrap: wrap;
+    /* Allows inline forms to span full width */
+    align-items: center;
 }
 
 .reference-entity {
     color: var(--color-primary, #0645ad);
     text-decoration: none;
+    min-width: 150px;
 }
 
 .reference-details {
     color: var(--color-text-secondary, #54595d);
+    flex: 1;
 }
 
 /* ============================================

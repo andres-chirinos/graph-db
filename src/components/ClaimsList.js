@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import ClaimItem from "./ClaimItem";
-import ClaimForm from "./ClaimForm";
 import EntitySelector from "./EntitySelector";
 import InlineClaimForm from "./InlineClaimForm";
 
@@ -31,7 +30,6 @@ export default function ClaimsList({
   onReferenceDelete,
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingClaim, setEditingClaim] = useState(null);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -100,7 +98,7 @@ export default function ClaimsList({
                     key={claim.$id}
                     claim={claim}
                     editable={editable}
-                    onEdit={(c) => setEditingClaim(c)}
+                    onEdit={onClaimUpdate}
                     onDelete={onClaimDelete}
                     onQualifierCreate={async (data) => {
                       await onQualifierCreate?.({ ...data, claim: claim.$id });
@@ -167,19 +165,6 @@ export default function ClaimsList({
         />
       )}
 
-      {/* Modal para editar declaración */}
-      {editingClaim && (
-        <ClaimForm
-          isOpen={!!editingClaim}
-          onClose={() => setEditingClaim(null)}
-          onSave={async (data, claimId) => {
-            await onClaimUpdate?.(data, claimId);
-            setEditingClaim(null);
-          }}
-          claim={editingClaim}
-          subjectId={subjectId}
-        />
-      )}
     </div>
   );
 }

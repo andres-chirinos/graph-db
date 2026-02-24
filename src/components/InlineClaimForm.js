@@ -13,14 +13,42 @@ export default function InlineClaimForm({
     onSave,
     onCancel,
     subjectId,
+    initialData = null,
     loading = false,
 }) {
-    const [property, setProperty] = useState("");
+    const isEditing = !!initialData;
+    const [property, setProperty] = useState(initialData?.property?.$id || "");
 
     // Smart state
-    const [valueType, setValueType] = useState("raw");
-    const [valueRaw, setValueRaw] = useState({ datatype: "string", data: "" });
-    const [valueRelation, setValueRelation] = useState("");
+    const [valueType, setValueType] = useState(initialData?.value_relation ? "relation" : "raw");
+
+    const getInitialValueRaw = () => {
+        if (!initialData) return { datatype: "string", data: "" };
+        const dt = initialData.datatype || initialData.property?.datatype || "string";
+        let data = initialData.value_raw;
+        if (typeof data === "string") {
+            try {
+                const parsed = JSON.parse(data);
+                if (parsed && typeof parsed === "object" && parsed.datatype !== undefined) {
+                    return { datatype: parsed.datatype || dt, data: parsed.data };
+                }
+            } catch { /* keep as string */ }
+        } else if (typeof data === "object" && data !== null && data.datatype !== undefined) {
+            return { datatype: data.datatype || dt, data: data.data };
+        }
+
+        if (dt === "polygon" || dt === "image") {
+            if (typeof data === "object" && data?.url) data = data.url;
+            else if (typeof data === "object") {
+                try { data = JSON.stringify(data); } catch { data = String(data); }
+            }
+        }
+
+        return { datatype: dt, data: data ?? "" };
+    };
+
+    const [valueRaw, setValueRaw] = useState(getInitialValueRaw());
+    const [valueRelation, setValueRelation] = useState(initialData?.value_relation?.$id || "");
 
     const [error, setError] = useState(null);
 
@@ -92,12 +120,15 @@ export default function InlineClaimForm({
             }
 
             const data = {
-                subject: subjectId,
                 property: property,
                 datatype: resolvedDatatype,
                 value_raw: finalValueRaw,
                 value_relation: valueType === "relation" ? valueRelation : null,
             };
+
+            if (!isEditing && subjectId) {
+                data.subject = subjectId;
+            }
 
             await onSave(data);
             // Parent component will unmount this or we clear the form
@@ -123,19 +154,20 @@ export default function InlineClaimForm({
                     />
                 </div>
 
-                <div className="inline-claim-value-type">
-                    <select
-                        className="form-select compact-select"
-                        value={valueType}
-                        onChange={(e) => {
-                            setValueType(e.target.value);
-                            if (e.target.value === "relation") setValueRaw({ datatype: "string", data: "" });
-                            if (e.target.value === "raw") setValueRelation("");
-                        }}
-                    >
-                        <option value="raw">Literal (auto)</option>
-                        <option value="relation">Entidad</option>
-                    </select>
+                <div className="inline-claim-value-type" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', margin: 0 }} title="¿El valor es una relación con otra entidad?">
+                        <input
+                            type="checkbox"
+                            checked={valueType === "relation"}
+                            onChange={(e) => {
+                                const newType = e.target.checked ? "relation" : "raw";
+                                setValueType(newType);
+                                if (newType === "relation") setValueRaw({ datatype: "string", data: "" });
+                                if (newType === "raw") setValueRelation("");
+                            }}
+                        />
+                        Entidad
+                    </label>
                 </div>
 
                 <div className="inline-claim-value">
@@ -161,7 +193,7 @@ export default function InlineClaimForm({
                         type="button"
                         className="btn-icon btn-save"
                         onClick={handleSubmit}
-                        disabled={loading || !property || (valueType === "raw" ? !valueRaw.data : !valueRelation)}
+                        disabled={loading || !property || (valueType === "raw" ? (valueRaw.data === "" || valueRaw.data === null || valueRaw.data === undefined) : !valueRelation)}
                         title="Guardar"
                     >
                         <span className="icon-check"></span>
