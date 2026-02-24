@@ -30,9 +30,11 @@ export default function ClaimsList({
   onReferenceDelete,
 }) {
   const [formVisibleForProperty, setFormVisibleForProperty] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [localLoadingProps, setLocalLoadingProps] = useState(new Set());
+  const [isSaving, setIsSaving] = useState(false);
 
   // Merge summary and loaded claims
   const allGroups = {};
@@ -105,6 +107,37 @@ export default function ClaimsList({
 
   return (
     <div className="claims-container">
+      {/* Global Add Claim Button */}
+      {editable && (
+        <div className="global-add-claim" style={{ marginBottom: '1.5rem' }}>
+          {!showAddForm ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setShowAddForm(true)}
+            >
+              + Añadir declaración
+            </button>
+          ) : (
+            <div className="inline-add-container" style={{ padding: '1rem', background: 'var(--color-bg-subtle, #f8f9fa)', borderRadius: '8px', border: '1px solid var(--color-border-light, #e0e0e0)' }}>
+              <InlineClaimForm
+                onCancel={() => setShowAddForm(false)}
+                onSave={async (data) => {
+                  setIsSaving(true);
+                  try {
+                    await onClaimCreate?.(data);
+                    setShowAddForm(false);
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }}
+                subjectId={subjectId}
+                loading={isSaving}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div className="claims-loading">
@@ -112,9 +145,11 @@ export default function ClaimsList({
           <p>Cargando declaraciones...</p>
         </div>
       ) : (!claims || claims.length === 0) ? (
-        <div className="claims-empty">
-          <span className="icon-info"></span>
-          <p>No se encontraron declaraciones.</p>
+        <div className="claims-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '3rem 0' }}>
+          <div>
+            <span className="icon-info"></span>
+            <p>No se encontraron declaraciones.</p>
+          </div>
         </div>
       ) : (
         <div className="claims-layout">
@@ -200,10 +235,16 @@ export default function ClaimsList({
                           initialData={{ property: group.property || { $id: propertyId } }}
                           onCancel={() => setFormVisibleForProperty(null)}
                           onSave={async (data) => {
-                            await onClaimCreate?.(data);
-                            setFormVisibleForProperty(null);
+                            setIsSaving(true);
+                            try {
+                              await onClaimCreate?.(data);
+                              setFormVisibleForProperty(null);
+                            } finally {
+                              setIsSaving(false);
+                            }
                           }}
                           subjectId={subjectId}
+                          loading={isSaving}
                         />
                       ) : (
                         <button
