@@ -1,122 +1,35 @@
-import { Client, Databases, Permission, Role, ID } from "appwrite";
-import * as XLSX from "xlsx";
+const fs = require('fs');
+const path = require('path');
+const sdk = require('node-appwrite');
+const XLSX = require('xlsx');
 
-/**
- * Entrypoint para Appwrite Function
- * @param {Object} req - Appwrite function request
- * @param {Object} res - Appwrite function response
- */
-export default async function main(req, res) {
-    try {
-        // Usar solo req.files y req.variables, nunca parsear JSON del body
-        console.log('req.files:', req.files);
-        console.log('req.variables:', req.variables);
+const DATABASE_ID = process.env.APPWRITE_DATABASE_ID || process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || "master";
 
-        const configRaw = req.variables?.config;
-        const file = req.files?.file;
+const COLLECTION_FIELDS = {
+    entities: ['label', 'description', 'aliases'],
+    claims: ['subject', 'property', 'datatype', 'value_raw', 'value_relation'],
+    qualifiers: ['claim', 'property', 'datatype', 'value_raw', 'value_relation'],
+    references: ['claim', 'reference', 'details'],
+};
 
-        if (!configRaw) {
-            console.error('Missing config in req.variables');
-            return res.json({ error: 'Missing config in req.variables' }, 400);
-        }
-        if (!file) {
-            console.error('Missing file in req.files');
-            return res.json({ error: 'Missing file in req.files' }, 400);
-        }
-
-        // Si configRaw es string, intentar parsear como JSON, pero solo si parece JSON
-        let config = configRaw;
-        if (typeof configRaw === 'string' && (configRaw.trim().startsWith('{') || configRaw.trim().startsWith('['))) {
-            try {
-                config = JSON.parse(configRaw);
-            } catch (e) {
-                console.error('Config is not valid JSON:', configRaw);
-                return res.json({ error: 'Config is not valid JSON', details: configRaw }, 400);
-            }
-        }
-
-        // ...aquí iría la lógica de importación usando config y file...
-        console.log('Config and file received, ready to process.');
-        return res.json({ ok: true, debug: { config, fileName: file.name } });
-    } catch (err) {
-        console.error('import-data main catch', err);
-        return res.json({ error: err.message || err.toString() }, 500);
-    }
-}
-
-// Utilidades (puedes extraer de tu código actual)
-function mapRowValues(row, config) {
-    const output = {};
-    const fields = Array.isArray(config.fields) ? config.fields : [];
-    fields.forEach((field) => {
-        if (!field?.name) return;
-        const source = field.source;
-        let value = null;
-        if (source && row[source] !== undefined) {
-            value = row[source];
-        } else if (source) {
-            const index = parseColumnLabel(source);
-            if (index !== null && Array.isArray(row.__values)) {
-                value = row.__values[index];
-            }
-        }
-        output[field.name] = value ?? "";
-    });
-    return output;
-}
-
-function parseColumnLabel(source) {
-    const match = /Columna\s+([A-Z]+)/i.exec(source || "");
-    if (!match) return null;
-    const letters = match[1].toUpperCase();
-    let index = 0;
-    for (let i = 0; i < letters.length; i += 1) {
-        index *= 26;
-        index += letters.charCodeAt(i) - 65 + 1;
-    }
-    return index - 1;
-}
-
-async function parseImportFile(file, config) {
-    const format = config.format || "csv";
-    const hasHeader = Boolean(config.hasHeader ?? true);
-    if (format === "csv" || format === "tsv") {
-        const separator = format === "tsv" ? "\t" : config.delimiter || ",";
-        const text = file.buffer ? file.buffer.toString() : file.toString();
-        const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-        if (!lines.length) return [];
-        const headers = hasHeader
-            ? parseDelimitedLine(lines[0], separator)
-            : lines[0].split(separator).map((_, index) => `col_${index + 1}`);
-        const rows = lines.slice(hasHeader ? 1 : 0).map((line) => parseDelimitedLine(line, separator));
-        return rows.map((values) => {
-            const row = { __values: values };
-            headers.forEach((h, i) => (row[h] = values[i]));
-            return row;
-        });
-    }
-    if (format === "json") {
-        const text = file.buffer ? file.buffer.toString() : file.toString();
-        const data = JSON.parse(text);
-        return Array.isArray(data) ? data : [];
-    }
-    if (format === "xlsx") {
-        const workbook = XLSX.read(file.buffer, { type: "buffer" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(sheet, { header: hasHeader ? 0 : 1 });
-        return data;
-    }
-    return [];
-}
+// ============================================
+// PARSING UTILITIES
+// ============================================
 
 function parseDelimitedLine(line, separator) {
     const result = [];
     let current = "";
     let inQuotes = false;
-    for (let i = 0; i < line.length; i += 1) {
+    for (let i = 0; i < line.length; i++) {
         const char = line[i];
+        const next = line[i + 1];
         if (char === '"') {
-            inQuotes = !inQuotes;
+            if (inQuotes && next === '"') {
+                current += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
         } else if (char === separator && !inQuotes) {
             result.push(current.trim());
             current = "";
@@ -127,3 +40,376 @@ function parseDelimitedLine(line, separator) {
     result.push(current.trim());
     return result;
 }
+
+function parseCsvString(csvString, config = {}) {
+    const hasHeader = config.hasHeader !== false;
+    const separator = config.delimiter || ",";
+    const lines = csvString.split(/\r?\n/).filter(l => l.trim().length > 0);
+    if (!lines.length) return { headers: [], rows: [] };
+
+    const headers = hasHeader
+        ? parseDelimitedLine(lines[0], separator)
+        : lines[0].split(separator).map((_, i) => `col_${i + 1}`);
+
+    const dataLines = lines.slice(hasHeader ? 1 : 0);
+    const rows = dataLines.map(line => {
+        const values = parseDelimitedLine(line, separator);
+        const row = {};
+        headers.forEach((h, i) => {
+            row[h] = values[i] ?? "";
+        });
+        return row;
+    });
+
+    return { headers, rows };
+}
+
+function parseXlsxBuffer(buffer, config = {}) {
+    const hasHeader = config.hasHeader !== false;
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return { headers: [], rows: [] };
+
+    const sheet = workbook.Sheets[sheetName];
+    const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
+    if (!rawRows.length) return { headers: [], rows: [] };
+
+    const headers = hasHeader
+        ? rawRows[0].map(v => `${v}`)
+        : rawRows[0].map((_, i) => `col_${i + 1}`);
+
+    const dataRows = rawRows.slice(hasHeader ? 1 : 0);
+    const rows = dataRows.map(values => {
+        const row = {};
+        headers.forEach((h, i) => {
+            row[h] = values[i] ?? "";
+        });
+        return row;
+    });
+
+    return { headers, rows };
+}
+
+function parseJsonString(jsonString) {
+    const parsed = JSON.parse(jsonString);
+    const data = Array.isArray(parsed) ? parsed
+        : Array.isArray(parsed?.data) ? parsed.data
+            : Array.isArray(parsed?.items) ? parsed.items
+                : Array.isArray(parsed?.rows) ? parsed.rows
+                    : [];
+    if (!data.length) return { headers: [], rows: [] };
+
+    if (Array.isArray(data[0])) {
+        const headers = data[0].map(v => `${v}`);
+        const rows = data.slice(1).map(values => {
+            const row = {};
+            headers.forEach((h, i) => { row[h] = values[i] ?? ""; });
+            return row;
+        });
+        return { headers, rows };
+    }
+
+    const headers = Object.keys(data[0]);
+    return { headers, rows: data };
+}
+
+// ============================================
+// ROW MAPPING
+// ============================================
+
+function mapRow(row, fields, targetCollection) {
+    const doc = {};
+
+    for (const mapping of fields) {
+        const { source, target, defaultValue, transform } = mapping;
+        let value = row[source] ?? defaultValue ?? "";
+
+        // Apply basic transforms
+        if (transform === "number") {
+            value = Number(value) || 0;
+        } else if (transform === "boolean") {
+            value = value === "true" || value === "1" || value === true;
+        } else if (transform === "json") {
+            try { value = JSON.parse(value); } catch { /* keep as string */ }
+        } else if (transform === "array") {
+            // Split by | or ; for arrays (e.g. aliases)
+            value = String(value).split(/[|;]/).map(s => s.trim()).filter(Boolean);
+        } else {
+            value = String(value);
+        }
+
+        doc[target] = value;
+    }
+
+    // Set sensible defaults for entities
+    if (targetCollection === "entities") {
+        if (!doc.label) doc.label = "";
+        if (!doc.description) doc.description = "";
+        if (!doc.aliases) doc.aliases = [];
+        if (typeof doc.aliases === "string") {
+            doc.aliases = doc.aliases.split(/[|;]/).map(s => s.trim()).filter(Boolean);
+        }
+    }
+
+    // Set sensible defaults for claims
+    if (targetCollection === "claims") {
+        if (!doc.datatype) doc.datatype = doc.value_relation ? "relation" : "string";
+        if (doc.value_raw !== undefined && doc.value_raw !== null && typeof doc.value_raw !== "string") {
+            doc.value_raw = JSON.stringify(doc.value_raw);
+        }
+    }
+
+    return doc;
+}
+
+// ============================================
+// IMPORT ENGINE
+// ============================================
+
+async function importRows(databases, config, rows, log) {
+    const targetCollection = config.targetCollection || "entities";
+    const fields = config.fields || [];
+    const useBatch = config.useBatch === true;
+    const batchSize = config.batchSize || 50;
+
+    const results = {
+        total: rows.length,
+        created: 0,
+        errors: [],
+    };
+
+    if (useBatch) {
+        // Batch mode using createDocuments
+        for (let i = 0; i < rows.length; i += batchSize) {
+            const chunk = rows.slice(i, i + batchSize);
+            const documents = chunk.map((row, idx) => {
+                try {
+                    const data = mapRow(row, fields, targetCollection);
+                    return {
+                        $id: sdk.ID.unique(),
+                        data,
+                    };
+                } catch (err) {
+                    results.errors.push({ row: i + idx + 1, error: err.message });
+                    return null;
+                }
+            }).filter(Boolean);
+
+            if (documents.length === 0) continue;
+
+            try {
+                await databases.createDocuments({
+                    databaseId: DATABASE_ID,
+                    collectionId: targetCollection,
+                    documents,
+                });
+                results.created += documents.length;
+                log(`Batch ${Math.floor(i / batchSize) + 1}: created ${documents.length} documents`);
+            } catch (err) {
+                // If batch fails, try one by one
+                log(`Batch failed, falling back to individual inserts: ${err.message}`);
+                for (let j = 0; j < documents.length; j++) {
+                    try {
+                        await databases.createDocument({
+                            databaseId: DATABASE_ID,
+                            collectionId: targetCollection,
+                            documentId: documents[j].$id,
+                            data: documents[j].data,
+                        });
+                        results.created++;
+                    } catch (innerErr) {
+                        results.errors.push({
+                            row: i + j + 1,
+                            error: innerErr.message,
+                            data: documents[j].data,
+                        });
+                    }
+                }
+            }
+        }
+    } else {
+        // Row-by-row mode
+        for (let i = 0; i < rows.length; i++) {
+            try {
+                const data = mapRow(rows[i], fields, targetCollection);
+
+                await databases.createDocument({
+                    databaseId: DATABASE_ID,
+                    collectionId: targetCollection,
+                    documentId: sdk.ID.unique(),
+                    data,
+                });
+
+                results.created++;
+
+                if ((i + 1) % 50 === 0) {
+                    log(`Progress: ${i + 1}/${rows.length} rows processed`);
+                }
+            } catch (err) {
+                results.errors.push({
+                    row: i + 1,
+                    error: err.message,
+                    data: rows[i],
+                });
+            }
+        }
+    }
+
+    return results;
+}
+
+// ============================================
+// MAIN HANDLER
+// ============================================
+
+module.exports = async ({ req, res, log, error }) => {
+    try {
+        // ------- GET: Serve HTML Interface -------
+        if (req.method === 'GET') {
+            const htmlContent = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+
+            const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || '';
+            const projectId = process.env.APPWRITE_PROJECT_ID || process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || '';
+
+            const rendered = htmlContent
+                .replace(/\{\{APPWRITE_ENDPOINT\}\}/g, endpoint)
+                .replace(/\{\{APPWRITE_PROJECT_ID\}\}/g, projectId);
+
+            return res.text(rendered, 200, {
+                'Content-Type': 'text/html',
+            });
+        }
+
+        // ------- POST: Process Import -------
+        if (req.method === 'POST') {
+            let body = req.body;
+            if (typeof body === 'string') {
+                body = JSON.parse(body);
+            }
+
+            if (!body) {
+                return res.json({ error: 'Request body is required' }, 400);
+            }
+
+            const {
+                targetCollection = "entities",
+                format = "csv",
+                hasHeader = true,
+                delimiter = ",",
+                fields = [],
+                csvData,
+                jsonData,
+                rows: preRows,
+                useBatch = false,
+                batchSize = 50,
+            } = body;
+
+            // Validate required fields
+            if (!fields || !Array.isArray(fields) || fields.length === 0) {
+                return res.json({
+                    error: 'Field mappings are required',
+                    example: {
+                        fields: [
+                            { source: "Column Name", target: "label" },
+                            { source: "Description Column", target: "description" },
+                        ]
+                    }
+                }, 400);
+            }
+
+            // Validate target collection
+            const validCollections = Object.keys(COLLECTION_FIELDS);
+            if (!validCollections.includes(targetCollection)) {
+                return res.json({
+                    error: `Invalid targetCollection. Must be one of: ${validCollections.join(', ')}`,
+                }, 400);
+            }
+
+            // Validate target fields
+            const validTargets = COLLECTION_FIELDS[targetCollection];
+            const invalidFields = fields.filter(f => !validTargets.includes(f.target));
+            if (invalidFields.length > 0) {
+                return res.json({
+                    error: `Invalid target fields for collection "${targetCollection}": ${invalidFields.map(f => f.target).join(', ')}`,
+                    validFields: validTargets,
+                }, 400);
+            }
+
+            // Parse data
+            let parsedRows = [];
+            let parsedHeaders = [];
+
+            if (preRows && Array.isArray(preRows)) {
+                // Pre-parsed rows
+                parsedRows = preRows;
+                parsedHeaders = preRows.length > 0 ? Object.keys(preRows[0]) : [];
+            } else if (csvData) {
+                const result = parseCsvString(csvData, { hasHeader, delimiter });
+                parsedRows = result.rows;
+                parsedHeaders = result.headers;
+            } else if (jsonData) {
+                const dataStr = typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData);
+                const result = parseJsonString(dataStr);
+                parsedRows = result.rows;
+                parsedHeaders = result.headers;
+            } else {
+                return res.json({
+                    error: 'No data provided. Send "csvData" (string), "jsonData", or "rows" (array).',
+                }, 400);
+            }
+
+            if (parsedRows.length === 0) {
+                return res.json({
+                    error: 'No rows found in the provided data.',
+                    headers: parsedHeaders,
+                }, 400);
+            }
+
+            log(`Importing ${parsedRows.length} rows into "${targetCollection}"`);
+
+            // Initialize Appwrite client
+            const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
+            const projectId = process.env.APPWRITE_PROJECT_ID || process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID;
+            const apiKey = req.headers['x-appwrite-key'] || process.env.APPWRITE_API_KEY;
+
+            if (!endpoint || !projectId) {
+                return res.json({ error: 'Missing APPWRITE_ENDPOINT or APPWRITE_PROJECT_ID' }, 500);
+            }
+
+            const client = new sdk.Client()
+                .setEndpoint(endpoint)
+                .setProject(projectId);
+
+            if (apiKey) {
+                client.setKey(apiKey);
+            } else {
+                log("Warning: No API Key. Operations may fail due to permissions.");
+            }
+
+            const databases = new sdk.Databases(client);
+
+            // Execute import
+            const importResult = await importRows(databases, {
+                targetCollection,
+                fields,
+                useBatch,
+                batchSize,
+            }, parsedRows, log);
+
+            log(`Import complete: ${importResult.created}/${importResult.total} created, ${importResult.errors.length} errors`);
+
+            return res.json({
+                success: true,
+                ...importResult,
+                // Limit error details to first 50 to avoid huge responses
+                errors: importResult.errors.slice(0, 50),
+                hasMoreErrors: importResult.errors.length > 50,
+            }, 200);
+        }
+
+        return res.json({ error: 'Method not allowed. Use GET for UI or POST to import.' }, 405);
+    } catch (err) {
+        error(err.message || err.toString());
+        return res.json({ error: err.message || 'Internal Server Error' }, 500);
+    }
+};
