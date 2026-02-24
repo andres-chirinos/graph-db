@@ -4,6 +4,7 @@ import { useState } from "react";
 import ClaimItem from "./ClaimItem";
 import ClaimForm from "./ClaimForm";
 import EntitySelector from "./EntitySelector";
+import InlineClaimForm from "./InlineClaimForm";
 
 /**
  * Lista de claims agrupados por propiedad con filtros y paginación
@@ -142,8 +143,8 @@ export default function ClaimsList({
         </div>
       )}
 
-      {editable && (
-        <div className="claims-actions">
+      {editable && !showAddForm && (
+        <div className="claims-actions" style={{ marginTop: '1rem' }}>
           <button
             type="button"
             className="btn btn-primary"
@@ -154,11 +155,10 @@ export default function ClaimsList({
         </div>
       )}
 
-      {/* Modal para nueva declaración */}
+      {/* Formulario en línea para nueva declaración */}
       {showAddForm && (
-        <ClaimForm
-          isOpen={showAddForm}
-          onClose={() => setShowAddForm(false)}
+        <InlineClaimForm
+          onCancel={() => setShowAddForm(false)}
           onSave={async (data) => {
             await onClaimCreate?.(data);
             setShowAddForm(false);

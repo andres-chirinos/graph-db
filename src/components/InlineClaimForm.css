@@ -1,0 +1,99 @@
+.inline-claim-form {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.5rem;
+    margin-top: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.inline-claim-grid {
+    display: grid;
+    grid-template-columns: 200px 120px 1fr auto;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.inline-error {
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.inline-claim-property .compact-selector,
+.inline-claim-value .compact-selector {
+    margin: 0;
+}
+
+.compact-select {
+    padding: 0.4rem;
+    font-size: 0.85rem;
+    height: 38px;
+}
+
+.inline-claim-value {
+    display: flex;
+    align-items: center;
+}
+
+.inline-claim-value .value-input {
+    width: 100%;
+    margin: 0;
+}
+
+.inline-claim-value .value-input-row {
+    margin: 0;
+}
+
+.inline-claim-actions {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.btn-icon {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    color: var(--text-secondary);
+}
+
+.btn-icon:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+}
+
+.btn-icon:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-icon.btn-save {
+    color: #10b981;
+    /* green */
+}
+
+.btn-icon.btn-save:hover:not(:disabled) {
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+.btn-icon.btn-cancel {
+    color: #ef4444;
+    /* red */
+}
+
+.btn-icon.btn-cancel:hover:not(:disabled) {
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .inline-claim-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto auto;
+    }
+}
