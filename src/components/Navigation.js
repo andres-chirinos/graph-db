@@ -48,7 +48,6 @@ export default function Navigation() {
         onClick={handleAdvancedSearch}
       >
         Búsqueda avanzada
-        <span className="action-shortcut">⌘K</span>
       </button>
       <button
         type="button"

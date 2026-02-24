@@ -58,20 +58,39 @@ function calculateRelevance(entity, term) {
  * Busca entidades por texto (label, description, aliases)
  */
 export async function searchEntities(searchTerm, limit = 20, offset = 0) {
-  const term = normalizeText(searchTerm);
+  let rawTerm = (searchTerm || "").trim();
+  let isExactMatch = false;
+
+  if (rawTerm.startsWith('"') && rawTerm.endsWith('"') && rawTerm.length > 2) {
+    isExactMatch = true;
+    rawTerm = rawTerm.slice(1, -1).trim();
+  }
+
+  const term = normalizeText(rawTerm);
   const queries = [
     Query.limit(limit),
     Query.offset(offset),
   ];
 
   if (searchTerm) {
-    queries.push(Query.or([
-      Query.search("label", term),
-      Query.search("description", term),
-      Query.contains("aliases", term),
-      Query.contains("label", term),
-      Query.equal("$id", term),
-    ]));
+    if (isExactMatch) {
+      // Búsqueda exacta (frase exacta o igualdad)
+      queries.push(Query.or([
+        Query.equal("label", rawTerm),
+        Query.contains("label", rawTerm),
+        Query.contains("aliases", rawTerm),
+        Query.equal("$id", rawTerm)
+      ]));
+    } else {
+      // Búsqueda flexible
+      queries.push(Query.or([
+        Query.search("label", term),
+        Query.search("description", term),
+        Query.contains("aliases", term),
+        Query.contains("label", term),
+        Query.equal("$id", rawTerm),
+      ]));
+    }
   } else {
     queries.push(Query.orderDesc("$createdAt"));
   }
@@ -84,8 +103,8 @@ export async function searchEntities(searchTerm, limit = 20, offset = 0) {
 
   if (searchTerm && result.rows.length > 0) {
     result.rows.sort((a, b) => {
-      const scoreA = calculateRelevance(a, searchTerm);
-      const scoreB = calculateRelevance(b, searchTerm);
+      const scoreA = calculateRelevance(a, rawTerm);
+      const scoreB = calculateRelevance(b, rawTerm);
       return scoreB - scoreA;
     });
   }
