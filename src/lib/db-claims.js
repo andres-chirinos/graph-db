@@ -472,3 +472,39 @@ export async function deleteClaim(claimId) {
     return wrapTransactionResult(result, changes);
   });
 }
+
+/**
+ * Obtiene un resumen de todas las propiedades usadas en los claims de un sujeto.
+ * Útil para el índice lateral cuando hay demasiados claims y la paginación no trae todos.
+ */
+export async function getClaimPropertiesSummary(subjectId) {
+  try {
+    const result = await tablesDB.listRows({
+      databaseId: DATABASE_ID,
+      tableId: TABLES.CLAIMS,
+      queries: [
+        Query.equal("subject", subjectId),
+        Query.limit(5000), // Usamos un límite alto para tratar de abarcar todas
+        Query.select(["property.*"])
+      ]
+    });
+
+    const summaryMap = {};
+    for (const row of result.rows) {
+      if (row.property && row.property.$id) {
+        if (!summaryMap[row.property.$id]) {
+          summaryMap[row.property.$id] = {
+            property: row.property,
+            count: 0
+          };
+        }
+        summaryMap[row.property.$id].count++;
+      }
+    }
+
+    return summaryMap;
+  } catch (err) {
+    console.error("Error fetching claim properties summary:", err);
+    return {};
+  }
+}

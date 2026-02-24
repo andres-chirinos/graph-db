@@ -11,10 +11,10 @@ import InlineClaimForm from "./InlineClaimForm";
 export default function ClaimsList({
   claims = [],
   loading = false,
-  page = 1,
-  limit = 10,
-  total = 0,
-  onPageChange,
+  hasMore = false,
+  onLoadMore,
+  claimPropertiesSummary = null,
+  onRequirePropertyLoad,
   filters = {},
   onFilterChange,
   subjectId,
@@ -29,18 +29,71 @@ export default function ClaimsList({
   onReferenceUpdate,
   onReferenceDelete,
 }) {
-  const [showAddForm, setShowAddForm] = useState(false);
   const [formVisibleForProperty, setFormVisibleForProperty] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [localLoadingProps, setLocalLoadingProps] = useState(new Set());
 
-  const totalPages = Math.ceil(total / limit);
+  // Merge summary and loaded claims
+  const allGroups = {};
 
-  const groupedClaims = groupByProperty(claims);
-  const filteredSidebarGroups = Object.entries(groupedClaims).filter(([propertyId, group]) => {
+  if (claimPropertiesSummary) {
+    for (const [propId, summary] of Object.entries(claimPropertiesSummary)) {
+      allGroups[propId] = {
+        property: summary.property,
+        claims: [],
+        count: summary.count
+      };
+    }
+  }
+
+  for (const claim of claims) {
+    const propId = claim.property?.$id || "unknown";
+    if (!allGroups[propId]) {
+      allGroups[propId] = {
+        property: claim.property,
+        claims: [],
+        count: 0
+      };
+    }
+    if (!allGroups[propId].claims.find(c => c.$id === claim.$id)) {
+      allGroups[propId].claims.push(claim);
+    }
+  }
+
+  // Sort groups alphabetically
+  const sortedGroupEntries = Object.entries(allGroups).sort((a, b) => {
+    const labelA = a[1].property?.label || a[0];
+    const labelB = b[1].property?.label || b[0];
+    return labelA.localeCompare(labelB);
+  });
+
+  const filteredSidebarGroups = sortedGroupEntries.filter(([propertyId, group]) => {
     const label = (group.property?.label || propertyId).toLowerCase();
     return label.includes(sidebarSearch.toLowerCase());
   });
+
+  const handleIndexClick = async (e, propertyId, group) => {
+    const loadedCount = group.claims.length;
+    const totalCount = group.count ?? 0;
+
+    // If not all claims are loaded for this property, load them specifically
+    if (loadedCount < totalCount) {
+      e.preventDefault();
+      if (!localLoadingProps.has(propertyId)) {
+        setLocalLoadingProps(prev => new Set(prev).add(propertyId));
+        await onRequirePropertyLoad?.(propertyId);
+        setLocalLoadingProps(prev => {
+          const next = new Set(prev);
+          next.delete(propertyId);
+          return next;
+        });
+      }
+      setTimeout(() => {
+        document.getElementById(`property-${propertyId}`)?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    }
+  };
 
   const handleFilterPropertyChange = (propertyId) => {
     onFilterChange?.({ ...filters, property: propertyId });
@@ -96,13 +149,14 @@ export default function ClaimsList({
                   <a
                     href={`#property-${propertyId}`}
                     className="claims-index-link"
-                    onClick={() => {
-                      // Opcionalmente cerrar el sidebar al hacer clic en móvil (comentado por ahora)
-                      // setIsSidebarOpen(false);
-                    }}
+                    onClick={(e) => handleIndexClick(e, propertyId, group)}
                   >
                     {group.property?.label || propertyId}
-                    <span className="claims-count">{group.claims.length}</span>
+                    {localLoadingProps.has(propertyId) ? (
+                      <span className="claims-count loading-spin">...</span>
+                    ) : (
+                      <span className="claims-count">{group.count ?? group.claims?.length ?? 0}</span>
+                    )}
                   </a>
                 </li>
               ))}
@@ -111,7 +165,7 @@ export default function ClaimsList({
 
           {/* Main Claims List */}
           <div className="claims-list">
-            {Object.entries(groupedClaims).map(([propertyId, group]) => (
+            {sortedGroupEntries.map(([propertyId, group]) => (
               <div key={propertyId} id={`property-${propertyId}`} className="claims-group">
                 <div className="claims-group-header">
                   <span className="property-label">
@@ -169,68 +223,21 @@ export default function ClaimsList({
         </div>
       )}
 
-      {/* Pagination Controls */}
-      {totalPages > 1 && (
+      {/* Load More Controls */}
+      {hasMore && (
         <div className="claims-pagination">
           <button
             className="btn-page"
-            disabled={page <= 1}
-            onClick={() => onPageChange?.(page - 1)}
+            onClick={onLoadMore}
+            disabled={loading}
           >
-            Anterior
-          </button>
-          <span className="page-info">
-            Página {page} de {totalPages}
-          </span>
-          <button
-            className="btn-page"
-            disabled={page >= totalPages}
-            onClick={() => onPageChange?.(page + 1)}
-          >
-            Siguiente
+            {loading ? "Cargando..." : "Cargar más declaraciones"}
           </button>
         </div>
-      )}
-
-      {editable && !showAddForm && (
-        <div className="claims-actions" style={{ marginTop: '1rem' }}>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => setShowAddForm(true)}
-          >
-            + Añadir declaración
-          </button>
-        </div>
-      )}
-
-      {/* Formulario en línea para nueva declaración */}
-      {showAddForm && (
-        <InlineClaimForm
-          onCancel={() => setShowAddForm(false)}
-          onSave={async (data) => {
-            await onClaimCreate?.(data);
-            setShowAddForm(false);
-          }}
-          subjectId={subjectId}
-        />
       )}
 
     </div>
   );
 }
 
-// Helper to group claims
-function groupByProperty(claims) {
-  return claims.reduce((acc, claim) => {
-    const propertyId = claim.property?.$id || "unknown";
-    if (!acc[propertyId]) {
-      acc[propertyId] = {
-        property: claim.property,
-        claims: [],
-      };
-    }
-    acc[propertyId].claims.push(claim);
-    return acc;
-  }, {});
-}
+

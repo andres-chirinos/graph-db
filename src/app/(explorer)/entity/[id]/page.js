@@ -26,6 +26,7 @@ import {
   getReferencesByEntityRole,
   getQualifiersByEntityRole,
   getClaimsBySubject,
+  getClaimPropertiesSummary,
 } from "@/lib/database";
 import "./page.css";
 
@@ -40,12 +41,12 @@ export default function EntityPage({ params }) {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
 
-  // Claims Pagination & Filtering State
   const [claimsPage, setClaimsPage] = useState(1);
-  const [claimsLimit] = useState(10);
+  const [claimsLimit] = useState(50);
   const [claimsTotal, setClaimsTotal] = useState(0);
   const [claimsFilters, setClaimsFilters] = useState({ property: null, value: "" });
   const [claimsLoading, setClaimsLoading] = useState(false);
+  const [claimPropertiesSummary, setClaimPropertiesSummary] = useState(null);
 
   const [graphData, setGraphData] = useState({
     incoming: [],
@@ -61,31 +62,78 @@ export default function EntityPage({ params }) {
     loadEntity();
   }, [id]);
 
-  // Fetch claims when page/filters change (only after initial load)
+  // Fetch claims when filters change (reset page)
   useEffect(() => {
     if (entity) {
-      loadClaims();
+      setClaimsPage(1);
+      loadClaims(true); // pass true to indicate a replace
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claimsPage, claimsFilters]);
+  }, [claimsFilters]);
 
-  async function loadClaims() {
+  async function loadClaims(replace = false) {
     if (!entity) return;
     setClaimsLoading(true);
     try {
-      const offset = (claimsPage - 1) * claimsLimit;
+      const currentPage = replace ? 1 : claimsPage;
+      const offset = (currentPage - 1) * claimsLimit;
       const result = await getClaimsBySubject(id, {
         limit: claimsLimit,
         offset,
         filters: claimsFilters
       });
-      setClaims(result.claims || []);
+
+      setClaims(prev => {
+        if (replace) return result.claims || [];
+        const map = new Map();
+        prev.forEach(c => map.set(c.$id, c));
+        (result.claims || []).forEach(c => map.set(c.$id, c));
+        return Array.from(map.values());
+      });
       setClaimsTotal(result.total || 0);
     } catch (err) {
       console.error("Error loading claims:", err);
-      // Optional: set specific error state for claims section
     } finally {
       setClaimsLoading(false);
+    }
+  }
+
+  async function handleLoadMore() {
+    setClaimsPage(prev => prev + 1);
+  }
+
+  // Carga progresiva automática
+  useEffect(() => {
+    let timer;
+    if (entity && claims.length > 0 && claims.length < claimsTotal && !claimsLoading) {
+      timer = setTimeout(() => {
+        setClaimsPage(prev => prev + 1);
+      }, 500);
+    }
+    return () => clearTimeout(timer);
+  }, [entity, claims.length, claimsTotal, claimsLoading]);
+
+  // Carga automática por cambios de página (si no es replace)
+  useEffect(() => {
+    if (entity && claimsPage > 1) {
+      loadClaims(false);
+    }
+  }, [claimsPage]);
+
+  async function handleRequirePropertyLoad(propertyId) {
+    try {
+      const result = await getClaimsBySubject(id, {
+        limit: 500, // Carga hasta 500 valores para esta propiedad específica
+        filters: { ...claimsFilters, property: propertyId }
+      });
+
+      setClaims(prev => {
+        const map = new Map();
+        prev.forEach(c => map.set(c.$id, c));
+        (result.claims || []).forEach(c => map.set(c.$id, c));
+        return Array.from(map.values());
+      });
+    } catch (err) {
+      console.error("Error cargando propiedad específica:", err);
     }
   }
 
@@ -113,12 +161,15 @@ export default function EntityPage({ params }) {
       // 3. Fetch other relationships for Graph (Parallel)
       // We fetch a reasonable limit for visualization (e.g., 50 each)
       const limit = 50;
-      const [incomingRes, propertyRes, refRes, qualValueRes] = await Promise.all([
+      const [incomingRes, propertyRes, refRes, qualValueRes, summaryRes] = await Promise.all([
         getClaimsByValueRelation(id, { limit }),
         getClaimsByProperty(id, { limit }),
         getReferencesByEntityRole(id, { limit }),
-        getQualifiersByEntityRole(id, { limit, role: 'value' })
+        getQualifiersByEntityRole(id, { limit, role: 'value' }),
+        getClaimPropertiesSummary(id)
       ]);
+
+      setClaimPropertiesSummary(summaryRes || {});
 
       setGraphData({
         incoming: incomingRes?.claims || [],
@@ -285,7 +336,13 @@ export default function EntityPage({ params }) {
               className={`entity-tab ${activeTab === "overview" ? "active" : ""}`}
               onClick={() => setActiveTab("overview")}
             >
-              Resumen
+              Declaraciones
+            </button>
+            <button
+              className={`entity-tab ${activeTab === "relationships" ? "active" : ""}`}
+              onClick={() => setActiveTab("relationships")}
+            >
+              Relaciones
             </button>
             <button
               className={`entity-tab ${activeTab === "statistics" ? "active" : ""}`}
@@ -313,15 +370,14 @@ export default function EntityPage({ params }) {
                 <ClaimsList
                   claims={claims}
                   loading={claimsLoading}
-                  page={claimsPage}
-                  limit={claimsLimit}
-                  total={claimsTotal}
-                  onPageChange={setClaimsPage}
+                  hasMore={claims.length < claimsTotal}
+                  onLoadMore={handleLoadMore}
                   filters={claimsFilters}
                   onFilterChange={(newFilters) => {
                     setClaimsFilters(prev => ({ ...prev, ...newFilters }));
-                    setClaimsPage(1); // Reset to page 1 on filter change
                   }}
+                  claimPropertiesSummary={claimPropertiesSummary}
+                  onRequirePropertyLoad={handleRequirePropertyLoad}
                   subjectId={id}
                   editable={editable}
                   onClaimCreate={handleCreateClaim}
@@ -336,6 +392,11 @@ export default function EntityPage({ params }) {
                 />
               </section>
 
+            </>
+          )}
+
+          {activeTab === "relationships" && (
+            <div className="mt-6">
               {/* Incoming Relations - Using new component */}
               <RelationshipsView
                 entityId={id}
@@ -375,7 +436,7 @@ export default function EntityPage({ params }) {
                 title="Citado en"
                 icon="icon-book"
               />
-            </>
+            </div>
           )}
 
           {activeTab === "statistics" && (
