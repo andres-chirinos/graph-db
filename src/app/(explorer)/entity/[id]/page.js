@@ -188,7 +188,11 @@ export default function EntityPage({ params }) {
   // ==================== ENTITY HANDLERS ====================
   async function handleUpdateEntity(data) {
     await updateEntity(id, data);
-    await loadEntity();
+    setEntity(prev => ({
+      ...prev,
+      ...data,
+      $updatedAt: new Date().toISOString()
+    }));
   }
 
   async function handleDeleteEntity() {
