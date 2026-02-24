@@ -16,7 +16,7 @@ export default function InlineClaimForm({
     initialData = null,
     loading = false,
 }) {
-    const isEditing = !!initialData;
+    const isEditing = !!initialData && !!initialData.$id;
     const [property, setProperty] = useState(initialData?.property?.$id || "");
 
     // Smart state

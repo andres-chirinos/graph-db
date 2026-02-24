@@ -30,8 +30,17 @@ export default function ClaimsList({
   onReferenceDelete,
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [formVisibleForProperty, setFormVisibleForProperty] = useState(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [sidebarSearch, setSidebarSearch] = useState("");
 
   const totalPages = Math.ceil(total / limit);
+
+  const groupedClaims = groupByProperty(claims);
+  const filteredSidebarGroups = Object.entries(groupedClaims).filter(([propertyId, group]) => {
+    const label = (group.property?.label || propertyId).toLowerCase();
+    return label.includes(sidebarSearch.toLowerCase());
+  });
 
   const handleFilterPropertyChange = (propertyId) => {
     onFilterChange?.({ ...filters, property: propertyId });
@@ -43,35 +52,6 @@ export default function ClaimsList({
 
   return (
     <div className="claims-container">
-      {/* Filter Bar */}
-      <div className="claims-filter-bar">
-        <div className="filter-group">
-          <EntitySelector
-            value={filters.property}
-            onChange={handleFilterPropertyChange}
-            placeholder="Filtrar por propiedad..."
-            className="filter-property-selector"
-          />
-        </div>
-        <div className="filter-group">
-          <input
-            type="text"
-            className="filter-input"
-            placeholder="Filtrar por valor..."
-            value={filters.value || ""}
-            onChange={handleFilterValueChange}
-          />
-        </div>
-        {(filters.property || filters.value) && (
-          <button
-            className="btn-clear-filters"
-            onClick={() => onFilterChange?.({ property: null, value: "" })}
-            title="Limpiar filtros"
-          >
-            ✕
-          </button>
-        )}
-      </div>
 
       {loading ? (
         <div className="claims-loading">
@@ -84,37 +64,108 @@ export default function ClaimsList({
           <p>No se encontraron declaraciones.</p>
         </div>
       ) : (
-        <div className="claims-list">
-          {Object.entries(groupByProperty(claims)).map(([propertyId, group]) => (
-            <div key={propertyId} className="claims-group">
-              <div className="claims-group-header">
-                <span className="property-label">
-                  {group.property?.label || propertyId}
-                </span>
-              </div>
-              <div className="claims-group-items">
-                {group.claims.map((claim) => (
-                  <ClaimItem
-                    key={claim.$id}
-                    claim={claim}
-                    editable={editable}
-                    onEdit={onClaimUpdate}
-                    onDelete={onClaimDelete}
-                    onQualifierCreate={async (data) => {
-                      await onQualifierCreate?.({ ...data, claim: claim.$id });
-                    }}
-                    onQualifierUpdate={onQualifierUpdate}
-                    onQualifierDelete={onQualifierDelete}
-                    onReferenceCreate={async (data) => {
-                      await onReferenceCreate?.({ ...data, claim: claim.$id });
-                    }}
-                    onReferenceUpdate={onReferenceUpdate}
-                    onReferenceDelete={onReferenceDelete}
-                  />
-                ))}
-              </div>
+        <div className="claims-layout">
+          {/* Index Sidebar Toggle */}
+          <button
+            type="button"
+            className={`claims-index-toggle ${isSidebarOpen ? "open" : "closed"}`}
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            title="Índice de propiedades"
+          >
+            {isSidebarOpen ? "◀ Índice" : "▶ Índice"}
+          </button>
+
+          {/* Index Sidebar */}
+          <div className={`claims-index-sidebar ${isSidebarOpen ? "open" : "closed"}`}>
+            <h3 className="claims-index-title">Propiedades</h3>
+
+            <div className="claims-index-search">
+              <input
+                type="text"
+                placeholder="Buscar propiedad..."
+                value={sidebarSearch}
+                onChange={(e) => setSidebarSearch(e.target.value)}
+                className="filter-input"
+                style={{ marginBottom: '1rem', width: '100%' }}
+              />
             </div>
-          ))}
+
+            <ul className="claims-index-list">
+              {filteredSidebarGroups.map(([propertyId, group]) => (
+                <li key={`nav-${propertyId}`}>
+                  <a
+                    href={`#property-${propertyId}`}
+                    className="claims-index-link"
+                    onClick={() => {
+                      // Opcionalmente cerrar el sidebar al hacer clic en móvil (comentado por ahora)
+                      // setIsSidebarOpen(false);
+                    }}
+                  >
+                    {group.property?.label || propertyId}
+                    <span className="claims-count">{group.claims.length}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Main Claims List */}
+          <div className="claims-list">
+            {Object.entries(groupedClaims).map(([propertyId, group]) => (
+              <div key={propertyId} id={`property-${propertyId}`} className="claims-group">
+                <div className="claims-group-header">
+                  <span className="property-label">
+                    {group.property?.label || propertyId}
+                  </span>
+                </div>
+                <div className="claims-group-items">
+                  {group.claims.map((claim) => (
+                    <ClaimItem
+                      key={claim.$id}
+                      claim={claim}
+                      editable={editable}
+                      onEdit={onClaimUpdate}
+                      onDelete={onClaimDelete}
+                      onQualifierCreate={async (data) => {
+                        await onQualifierCreate?.({ ...data, claim: claim.$id });
+                      }}
+                      onQualifierUpdate={onQualifierUpdate}
+                      onQualifierDelete={onQualifierDelete}
+                      onReferenceCreate={async (data) => {
+                        await onReferenceCreate?.({ ...data, claim: claim.$id });
+                      }}
+                      onReferenceUpdate={onReferenceUpdate}
+                      onReferenceDelete={onReferenceDelete}
+                    />
+                  ))}
+
+                  {editable && (
+                    <div className="claims-group-actions" style={{ marginTop: '0.5rem' }}>
+                      {formVisibleForProperty === propertyId ? (
+                        <InlineClaimForm
+                          initialData={{ property: group.property || { $id: propertyId } }}
+                          onCancel={() => setFormVisibleForProperty(null)}
+                          onSave={async (data) => {
+                            await onClaimCreate?.(data);
+                            setFormVisibleForProperty(null);
+                          }}
+                          subjectId={subjectId}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-add-inline"
+                          onClick={() => setFormVisibleForProperty(propertyId)}
+                        >
+                          + Añadir valor
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
