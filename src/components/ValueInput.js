@@ -67,6 +67,17 @@ export default function ValueInput({
     }
   }, []);
 
+  // Sync datatype when parent changes it (e.g. auto-detection in InlineClaimForm)
+  useEffect(() => {
+    if (value && typeof value === "object" && value.datatype && value.datatype !== datatype) {
+      setDatatype(value.datatype);
+      // Re-format data for the new datatype if needed
+      if (value.data !== undefined) {
+        setData(formatDataForInput(value.data, value.datatype));
+      }
+    }
+  }, [value?.datatype]);
+
   useEffect(() => {
     if (datatype !== "polygon") return;
     if (data === "" || data === null || data === undefined) return;
@@ -129,7 +140,7 @@ export default function ValueInput({
 
   function formatDataForInput(data, type) {
     if (data === null || data === undefined) return "";
-    
+
     switch (type) {
       case "date":
         // Si es timestamp, convertir a fecha

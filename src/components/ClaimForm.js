@@ -46,7 +46,7 @@ export default function ClaimForm({
       let finalValueRaw = null;
       if (valueType === "raw") {
         if (valueRaw?.datatype === "image" || valueRaw?.datatype === "polygon") {
-          finalValueRaw = valueRaw?.data?.url ?? null;
+          finalValueRaw = typeof valueRaw?.data === "string" ? valueRaw.data : (valueRaw?.data?.url ?? null);
         } else {
           finalValueRaw = valueRaw?.data ?? null;
         }

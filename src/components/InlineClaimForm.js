@@ -76,15 +76,31 @@ export default function InlineClaimForm({
                 return !isNaN(parseFloat(val)) && isFinite(val) && !val.includes(" ");
             };
 
+            // Datatypes that were set manually and should not be auto-overridden
+            const manualTypes = ["image", "polygon", "color", "coordinate", "json", "boolean"];
+
+            if (manualTypes.includes(detectedType)) {
+                // Don't override manually set special types
+                return;
+            }
+
             if (isUrl(text)) {
-                detectedType = "url";
+                // Detect image URLs
+                if (/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|tiff?)(\?.*)?$/i.test(text)) {
+                    detectedType = "image";
+                    // Detect GeoJSON URLs
+                } else if (/\.(geojson)(\?.*)?$/i.test(text)) {
+                    detectedType = "polygon";
+                } else {
+                    detectedType = "url";
+                }
             } else if (isDate(text)) {
                 detectedType = "date";
             } else if (isNumeric(text)) {
                 detectedType = "number";
             } else {
-                // Fallback string if not explicitly forced to something else
-                if (["url", "number", "date"].includes(detectedType)) {
+                // Fallback to string only from auto-detected types
+                if (["url", "number", "date", "image", "polygon"].includes(detectedType)) {
                     detectedType = "string";
                 }
             }
@@ -113,7 +129,7 @@ export default function InlineClaimForm({
             let finalValueRaw = null;
             if (valueType === "raw") {
                 if (valueRaw.datatype === "image" || valueRaw.datatype === "polygon") {
-                    finalValueRaw = valueRaw.data?.url ?? null;
+                    finalValueRaw = typeof valueRaw.data === "string" ? valueRaw.data : (valueRaw.data?.url ?? null);
                 } else {
                     finalValueRaw = valueRaw.data ?? null;
                 }
