@@ -6,10 +6,10 @@ const XLSX = require('xlsx');
 const DATABASE_ID = process.env.APPWRITE_DATABASE_ID || process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || "master";
 
 const COLLECTION_FIELDS = {
-    entities: ['label', 'description', 'aliases'],
-    claims: ['subject', 'property', 'datatype', 'value_raw', 'value_relation'],
-    qualifiers: ['claim', 'property', 'datatype', 'value_raw', 'value_relation'],
-    references: ['claim', 'reference', 'details'],
+    entities: ['$id', 'label', 'description', 'aliases'],
+    claims: ['$id', 'subject', 'property', 'datatype', 'value_raw', 'value_relation'],
+    qualifiers: ['$id', 'claim', 'property', 'datatype', 'value_raw', 'value_relation'],
+    references: ['$id', 'claim', 'reference', 'details'],
 };
 
 // ============================================
@@ -119,10 +119,18 @@ function parseJsonString(jsonString) {
 
 function mapRow(row, fields, targetCollection) {
     const doc = {};
+    let customId = null;
 
     for (const mapping of fields) {
         const { source, target, defaultValue, transform } = mapping;
         let value = row[source] ?? defaultValue ?? "";
+
+        // Handle $id separately — not part of document data
+        if (target === "$id") {
+            const idVal = String(value).trim();
+            if (idVal) customId = idVal;
+            continue;
+        }
 
         // Apply basic transforms
         if (transform === "number") {
@@ -132,7 +140,6 @@ function mapRow(row, fields, targetCollection) {
         } else if (transform === "json") {
             try { value = JSON.parse(value); } catch { /* keep as string */ }
         } else if (transform === "array") {
-            // Split by | or ; for arrays (e.g. aliases)
             value = String(value).split(/[|;]/).map(s => s.trim()).filter(Boolean);
         } else {
             value = String(value);
@@ -159,7 +166,7 @@ function mapRow(row, fields, targetCollection) {
         }
     }
 
-    return doc;
+    return { data: doc, customId };
 }
 
 // ============================================
@@ -176,71 +183,98 @@ async function importRows(databases, config, rows, log) {
         total: rows.length,
         created: 0,
         errors: [],
+        documents: [],  // Track created documents with their $id
     };
 
     if (useBatch) {
-        // Batch mode using createDocuments
+        // Batch mode: concurrent inserts in chunks using Promise.allSettled
         for (let i = 0; i < rows.length; i += batchSize) {
             const chunk = rows.slice(i, i + batchSize);
-            const documents = chunk.map((row, idx) => {
+            const promises = chunk.map((row, idx) => {
                 try {
+<<<<<<< Updated upstream
                     const data = mapRow(row, fields, targetCollection);
-                    return {
-                        $id: sdk.ID.unique(),
+                    return databases.createDocument(
+                        DATABASE_ID,
+                        targetCollection,
+                        sdk.ID.unique(),
+                        data
+                    ).then(() => ({ success: true, rowIndex: i + idx }));
+=======
+                    const { data, customId } = mapRow(row, fields, targetCollection);
+                    const docId = customId || sdk.ID.unique();
+                    return databases.createDocument(
+                        DATABASE_ID,
+                        targetCollection,
+                        docId,
+                        data
+                    ).then(doc => ({
+                        success: true,
+                        rowIndex: i + idx,
+                        $id: doc.$id,
                         data,
-                    };
+                        sourceRow: row,
+                    }));
+>>>>>>> Stashed changes
                 } catch (err) {
-                    results.errors.push({ row: i + idx + 1, error: err.message });
-                    return null;
+                    return Promise.resolve({ success: false, rowIndex: i + idx, error: err.message });
                 }
-            }).filter(Boolean);
+            });
 
-            if (documents.length === 0) continue;
+            const settled = await Promise.allSettled(promises);
 
-            try {
-                await databases.createDocuments({
-                    databaseId: DATABASE_ID,
-                    collectionId: targetCollection,
-                    documents,
-                });
-                results.created += documents.length;
-                log(`Batch ${Math.floor(i / batchSize) + 1}: created ${documents.length} documents`);
-            } catch (err) {
-                // If batch fails, try one by one
-                log(`Batch failed, falling back to individual inserts: ${err.message}`);
-                for (let j = 0; j < documents.length; j++) {
-                    try {
-                        await databases.createDocument({
-                            databaseId: DATABASE_ID,
-                            collectionId: targetCollection,
-                            documentId: documents[j].$id,
-                            data: documents[j].data,
-                        });
-                        results.created++;
-                    } catch (innerErr) {
-                        results.errors.push({
-                            row: i + j + 1,
-                            error: innerErr.message,
-                            data: documents[j].data,
-                        });
-                    }
+            for (const result of settled) {
+                if (result.status === 'fulfilled' && result.value.success) {
+                    results.created++;
+<<<<<<< Updated upstream
+=======
+                    results.documents.push({
+                        $id: result.value.$id,
+                        ...result.value.data,
+                        _sourceRow: result.value.sourceRow,
+                    });
+>>>>>>> Stashed changes
+                } else {
+                    const err = result.status === 'rejected'
+                        ? result.reason?.message || String(result.reason)
+                        : result.value?.error || 'Unknown error';
+                    const rowIdx = result.status === 'fulfilled' ? result.value.rowIndex : -1;
+                    results.errors.push({
+                        row: rowIdx + 1,
+                        error: err,
+                    });
                 }
             }
+
+            log(`Batch ${Math.floor(i / batchSize) + 1}: processed ${chunk.length} rows`);
         }
     } else {
-        // Row-by-row mode
+        // Row-by-row mode (sequential)
         for (let i = 0; i < rows.length; i++) {
             try {
-                const data = mapRow(rows[i], fields, targetCollection);
+                const { data, customId } = mapRow(rows[i], fields, targetCollection);
+                const docId = customId || sdk.ID.unique();
 
-                await databases.createDocument({
-                    databaseId: DATABASE_ID,
-                    collectionId: targetCollection,
-                    documentId: sdk.ID.unique(),
-                    data,
-                });
+<<<<<<< Updated upstream
+                await databases.createDocument(
+                    DATABASE_ID,
+                    targetCollection,
+                    sdk.ID.unique(),
+=======
+                const doc = await databases.createDocument(
+                    DATABASE_ID,
+                    targetCollection,
+                    docId,
+>>>>>>> Stashed changes
+                    data
+                );
 
                 results.created++;
+                results.documents.push({
+                    $id: doc.$id,
+                    ...data,
+                    _sourceRow: rows[i],
+                });
 
                 if ((i + 1) % 50 === 0) {
                     log(`Progress: ${i + 1}/${rows.length} rows processed`);
@@ -325,7 +359,7 @@ module.exports = async ({ req, res, log, error }) => {
                 }, 400);
             }
 
-            // Validate target fields
+            // Validate target fields ($id is always valid)
             const validTargets = COLLECTION_FIELDS[targetCollection];
             const invalidFields = fields.filter(f => !validTargets.includes(f.target));
             if (invalidFields.length > 0) {
@@ -340,7 +374,6 @@ module.exports = async ({ req, res, log, error }) => {
             let parsedHeaders = [];
 
             if (preRows && Array.isArray(preRows)) {
-                // Pre-parsed rows
                 parsedRows = preRows;
                 parsedHeaders = preRows.length > 0 ? Object.keys(preRows[0]) : [];
             } else if (csvData) {
@@ -400,8 +433,10 @@ module.exports = async ({ req, res, log, error }) => {
 
             return res.json({
                 success: true,
-                ...importResult,
-                // Limit error details to first 50 to avoid huge responses
+                total: importResult.total,
+                created: importResult.created,
+                // Include created documents with their $id for CSV export
+                documents: importResult.documents,
                 errors: importResult.errors.slice(0, 50),
                 hasMoreErrors: importResult.errors.length > 50,
             }, 200);

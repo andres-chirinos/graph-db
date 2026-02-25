@@ -303,6 +303,17 @@
             box-shadow: none;
         }
 
+        .btn-secondary {
+            background: var(--surface-2);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+            transform: translateY(-1px);
+        }
+
         /* Results */
         .result-box {
             background: var(--surface);
@@ -601,10 +612,12 @@
 
                 <div class="api-section">
                     <h4>📋 Campos válidos por colección</h4>
-                    <pre>entities:    label, description, aliases
-claims:      subject, property, datatype, value_raw, value_relation
-qualifiers:  claim, property, datatype, value_raw, value_relation
-references:  claim, reference, details</pre>
+                    <pre>entities:    $id, label, description, aliases
+claims:      $id, subject, property, datatype, value_raw, value_relation
+qualifiers:  $id, claim, property, datatype, value_raw, value_relation
+references:  $id, claim, reference, details
+
+$id: ID personalizado para el documento (opcional, se genera automático si no se provee)</pre>
                 </div>
 
                 <div class="api-section">
@@ -629,12 +642,13 @@ references:  claim, reference, details</pre>
         let fileHeaders = [];
         let fileRows = [];
         let allRows = [];
+        let lastImportResult = null;
 
         const COLLECTION_FIELDS = {
-            entities: ['label', 'description', 'aliases'],
-            claims: ['subject', 'property', 'datatype', 'value_raw', 'value_relation'],
-            qualifiers: ['claim', 'property', 'datatype', 'value_raw', 'value_relation'],
-            references: ['claim', 'reference', 'details'],
+            entities: ['$id', 'label', 'description', 'aliases'],
+            claims: ['$id', 'subject', 'property', 'datatype', 'value_raw', 'value_relation'],
+            qualifiers: ['$id', 'claim', 'property', 'datatype', 'value_raw', 'value_relation'],
+            references: ['$id', 'claim', 'reference', 'details'],
         };
 
         const TRANSFORMS = ['string', 'number', 'boolean', 'json', 'array'];
@@ -841,6 +855,7 @@ references:  claim, reference, details</pre>
             }
             // Common synonyms
             const synonyms = {
+                'id': '$id', 'identifier': '$id', 'document_id': '$id', 'doc_id': '$id',
                 'nombre': 'label', 'name': 'label', 'etiqueta': 'label', 'titulo': 'label', 'title': 'label',
                 'descripcion': 'description', 'desc': 'description',
                 'alias': 'aliases', 'sinónimos': 'aliases', 'synonyms': 'aliases',
@@ -940,11 +955,13 @@ references:  claim, reference, details</pre>
         }
 
         function showResults(result) {
+            lastImportResult = result;
             const section = document.getElementById('resultSection');
             section.classList.remove('hidden');
             document.getElementById('importActions').classList.remove('hidden');
 
             if (result.success) {
+                const hasDocuments = result.documents && result.documents.length > 0;
                 section.innerHTML = `
                 <div class="result-box success">
                     <h3 style="color: var(--success); margin-bottom: 16px;">✅ Importación completada</h3>
@@ -962,6 +979,16 @@ references:  claim, reference, details</pre>
                             <div class="stat-label">Errores</div>
                         </div>
                     </div>
+                    ${hasDocuments ? `
+                        <div style="margin: 16px 0; display: flex; gap: 12px; flex-wrap: wrap;">
+                            <button class="btn btn-secondary" onclick="downloadCsv()">
+                                📥 Descargar CSV con $id
+                            </button>
+                            <button class="btn btn-secondary" onclick="downloadJson()">
+                                📥 Descargar JSON con $id
+                            </button>
+                        </div>
+                    ` : ''}
                     ${result.errors?.length ? `
                         <h4 style="margin-bottom: 8px;">Errores:</h4>
                         <div class="errors-list">
@@ -979,6 +1006,62 @@ references:  claim, reference, details</pre>
                 </div>
             `;
             }
+        }
+
+        // ============ CSV/JSON DOWNLOAD ============
+        function downloadCsv() {
+            if (!lastImportResult?.documents?.length) return;
+
+            const docs = lastImportResult.documents;
+            // Get all keys excluding internal _sourceRow
+            const keys = Object.keys(docs[0]).filter(k => k !== '_sourceRow');
+
+            // Build CSV
+            const csvEscape = (val) => {
+                const str = val === null || val === undefined ? '' : String(val);
+                if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                    return '"' + str.replace(/"/g, '""') + '"';
+                }
+                return str;
+            };
+
+            const header = keys.map(csvEscape).join(',');
+            const rows = docs.map(doc =>
+                keys.map(k => {
+                    const val = doc[k];
+                    return csvEscape(Array.isArray(val) ? val.join('|') : val);
+                }).join(',')
+            );
+
+            const targetCollection = document.getElementById('targetCollection').value;
+            const csv = [header, ...rows].join('\n');
+            triggerDownload(csv, `${targetCollection}_imported.csv`, 'text/csv');
+        }
+
+        function downloadJson() {
+            if (!lastImportResult?.documents?.length) return;
+
+            const docs = lastImportResult.documents.map(doc => {
+                const clean = {};
+                for (const [k, v] of Object.entries(doc)) {
+                    if (k !== '_sourceRow') clean[k] = v;
+                }
+                return clean;
+            });
+
+            const targetCollection = document.getElementById('targetCollection').value;
+            const json = JSON.stringify(docs, null, 2);
+            triggerDownload(json, `${targetCollection}_imported.json`, 'application/json');
+        }
+
+        function triggerDownload(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType + ';charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
         }
     </script>
 </body>
