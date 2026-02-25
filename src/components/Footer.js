@@ -17,7 +17,7 @@ export default function Footer() {
                         <span>Estadísticas</span>
                     </Link>
                     <Link href="/import" className="nav-link flex items-center gap-2 hover:text-blue-600 transition-colors">
-                        <span className="icon-code" aria-hidden="true"></span>
+                        <span className="icon-code" aria-hidden="true">📥</span>
                         <span>Importar</span>
                     </Link>
                 </nav>

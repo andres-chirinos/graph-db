@@ -1,7 +1,4 @@
-const fs = require('fs');
-const path = require('path');
 const sdk = require('node-appwrite');
-const XLSX = require('xlsx');
 
 const DATABASE_ID = process.env.APPWRITE_DATABASE_ID || process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || "master";
 
@@ -54,32 +51,6 @@ function parseCsvString(csvString, config = {}) {
     const dataLines = lines.slice(hasHeader ? 1 : 0);
     const rows = dataLines.map(line => {
         const values = parseDelimitedLine(line, separator);
-        const row = {};
-        headers.forEach((h, i) => {
-            row[h] = values[i] ?? "";
-        });
-        return row;
-    });
-
-    return { headers, rows };
-}
-
-function parseXlsxBuffer(buffer, config = {}) {
-    const hasHeader = config.hasHeader !== false;
-    const workbook = XLSX.read(buffer, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    if (!sheetName) return { headers: [], rows: [] };
-
-    const sheet = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
-    if (!rawRows.length) return { headers: [], rows: [] };
-
-    const headers = hasHeader
-        ? rawRows[0].map(v => `${v}`)
-        : rawRows[0].map((_, i) => `col_${i + 1}`);
-
-    const dataRows = rawRows.slice(hasHeader ? 1 : 0);
-    const rows = dataRows.map(values => {
         const row = {};
         headers.forEach((h, i) => {
             row[h] = values[i] ?? "";
@@ -183,7 +154,7 @@ async function importRows(databases, config, rows, log) {
         total: rows.length,
         created: 0,
         errors: [],
-        documents: [],  // Track created documents with their $id
+        documents: [],
     };
 
     if (useBatch) {
@@ -192,15 +163,6 @@ async function importRows(databases, config, rows, log) {
             const chunk = rows.slice(i, i + batchSize);
             const promises = chunk.map((row, idx) => {
                 try {
-<<<<<<< Updated upstream
-                    const data = mapRow(row, fields, targetCollection);
-                    return databases.createDocument(
-                        DATABASE_ID,
-                        targetCollection,
-                        sdk.ID.unique(),
-                        data
-                    ).then(() => ({ success: true, rowIndex: i + idx }));
-=======
                     const { data, customId } = mapRow(row, fields, targetCollection);
                     const docId = customId || sdk.ID.unique();
                     return databases.createDocument(
@@ -215,7 +177,6 @@ async function importRows(databases, config, rows, log) {
                         data,
                         sourceRow: row,
                     }));
->>>>>>> Stashed changes
                 } catch (err) {
                     return Promise.resolve({ success: false, rowIndex: i + idx, error: err.message });
                 }
@@ -226,14 +187,11 @@ async function importRows(databases, config, rows, log) {
             for (const result of settled) {
                 if (result.status === 'fulfilled' && result.value.success) {
                     results.created++;
-<<<<<<< Updated upstream
-=======
                     results.documents.push({
                         $id: result.value.$id,
                         ...result.value.data,
                         _sourceRow: result.value.sourceRow,
                     });
->>>>>>> Stashed changes
                 } else {
                     const err = result.status === 'rejected'
                         ? result.reason?.message || String(result.reason)
@@ -255,17 +213,10 @@ async function importRows(databases, config, rows, log) {
                 const { data, customId } = mapRow(rows[i], fields, targetCollection);
                 const docId = customId || sdk.ID.unique();
 
-<<<<<<< Updated upstream
-                await databases.createDocument(
-                    DATABASE_ID,
-                    targetCollection,
-                    sdk.ID.unique(),
-=======
                 const doc = await databases.createDocument(
                     DATABASE_ID,
                     targetCollection,
                     docId,
->>>>>>> Stashed changes
                     data
                 );
 
@@ -298,20 +249,13 @@ async function importRows(databases, config, rows, log) {
 
 module.exports = async ({ req, res, log, error }) => {
     try {
-        // ------- GET: Serve HTML Interface -------
+        // ------- GET: Redirect to web app -------
         if (req.method === 'GET') {
-            const htmlContent = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-
-            const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || '';
-            const projectId = process.env.APPWRITE_PROJECT_ID || process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || '';
-
-            const rendered = htmlContent
-                .replace(/\{\{APPWRITE_ENDPOINT\}\}/g, endpoint)
-                .replace(/\{\{APPWRITE_PROJECT_ID\}\}/g, projectId);
-
-            return res.text(rendered, 200, {
-                'Content-Type': 'text/html',
-            });
+            return res.json({
+                message: 'Import Data API — use POST to import. UI available at /import in the web application.',
+                collections: Object.keys(COLLECTION_FIELDS),
+                fields: COLLECTION_FIELDS,
+            }, 200);
         }
 
         // ------- POST: Process Import -------
@@ -359,7 +303,7 @@ module.exports = async ({ req, res, log, error }) => {
                 }, 400);
             }
 
-            // Validate target fields ($id is always valid)
+            // Validate target fields
             const validTargets = COLLECTION_FIELDS[targetCollection];
             const invalidFields = fields.filter(f => !validTargets.includes(f.target));
             if (invalidFields.length > 0) {
@@ -435,14 +379,13 @@ module.exports = async ({ req, res, log, error }) => {
                 success: true,
                 total: importResult.total,
                 created: importResult.created,
-                // Include created documents with their $id for CSV export
                 documents: importResult.documents,
                 errors: importResult.errors.slice(0, 50),
                 hasMoreErrors: importResult.errors.length > 50,
             }, 200);
         }
 
-        return res.json({ error: 'Method not allowed. Use GET for UI or POST to import.' }, 405);
+        return res.json({ error: 'Method not allowed. Use POST to import data.' }, 405);
     } catch (err) {
         error(err.message || err.toString());
         return res.json({ error: err.message || 'Internal Server Error' }, 500);
