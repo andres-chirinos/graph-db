@@ -2,10 +2,11 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { executeFunction, FUNCTIONS } from "@/lib/functions";
 import { LoadingState } from "@/components";
 import "./style.css";
 
-const FUNCTION_ID = "import-data";
+const FUNCTION_ID = FUNCTIONS.IMPORT;
 
 const COLLECTION_FIELDS = {
     entities: ["$id", "label", "description", "aliases"],
@@ -139,7 +140,6 @@ export default function ImportPage() {
     // Config
     const [targetCollection, setTargetCollection] = useState("entities");
     const [insertMode, setInsertMode] = useState("single");
-    const [functionUrl, setFunctionUrl] = useState("");
 
     // Mapping
     const [mappings, setMappings] = useState([]);
@@ -238,13 +238,6 @@ export default function ImportPage() {
         setResult(null);
 
         try {
-            const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
-            const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID;
-
-            // The import-data function URL
-            const url = functionUrl.trim()
-                || `${endpoint}/v1/functions/${FUNCTION_ID}/executions`;
-
             const payload = {
                 targetCollection,
                 rows: allRows,
@@ -256,29 +249,10 @@ export default function ImportPage() {
             setProgress(30);
             setProgressText("Procesando importación en el servidor...");
 
-            const response = await fetch(url, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-Appwrite-Project": projectId,
-                },
-                body: JSON.stringify({
-                    body: JSON.stringify(payload),
-                }),
-            });
-
-            setProgress(90);
-
-            const data = await response.json();
-
-            // Appwrite wraps function output in responseBody
-            let importResult = data;
-            if (data.responseBody) {
-                try { importResult = JSON.parse(data.responseBody); } catch { importResult = data; }
-            }
+            const execution = await executeFunction(FUNCTION_ID, payload);
 
             setProgress(100);
-            setResult(importResult);
+            setResult(execution);
         } catch (err) {
             setResult({ success: false, error: err.message, total: allRows.length, created: 0, errors: [] });
         } finally {
@@ -400,16 +374,6 @@ export default function ImportPage() {
                                             <option value="single">Fila por fila</option>
                                             <option value="batch">Batch (lotes)</option>
                                         </select>
-                                    </div>
-                                    <div className="config-field">
-                                        <label>URL de la función (opcional)</label>
-                                        <input
-                                            type="text"
-                                            value={functionUrl}
-                                            onChange={(e) => setFunctionUrl(e.target.value)}
-                                            placeholder={`Auto: /v1/functions/${FUNCTION_ID}/executions`}
-                                            style={{ width: 320 }}
-                                        />
                                     </div>
                                 </div>
                             </div>
