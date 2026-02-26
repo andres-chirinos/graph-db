@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { executeFunction, FUNCTIONS } from "@/lib/functions";
 import { LoadingState } from "@/components";
@@ -304,9 +304,29 @@ export default function ImportPage() {
 
     const showConfig = fileHeaders.length > 0;
 
+    // Import mode: "flat" (single collection) or "schema" (entities+claims+qualifiers+refs)
+    const [importMode, setImportMode] = useState("flat");
+
     // Formulas (unified: transforms + computed columns)
     const [formulas, setFormulas] = useState([]);
     const [formulaPreview, setFormulaPreview] = useState(null);
+
+    // Schema builder state
+    const [schema, setSchema] = useState({
+        entities: {},
+        match: {},
+        claims: {},
+        qualifiers: {},
+        references: {},
+    });
+    const [schemaCounters, setSchemaCounters] = useState({ entity: 0, claim: 0, qual: 0, ref: 0 });
+    const [schemaJsonText, setSchemaJsonText] = useState("{}");
+    const schemaFileRef = useRef(null);
+
+    // Sync JSON text when schema changes from UI
+    useEffect(() => {
+        setSchemaJsonText(JSON.stringify(schema, null, 2));
+    }, [schema]);
 
     // === File Handling ===
     const handleFile = useCallback((file) => {
@@ -410,6 +430,62 @@ export default function ImportPage() {
         })));
     }
 
+    // === Schema Builder CRUD ===
+    function addSchemaItem(section, prefix, defaults) {
+        const key = `${prefix}-${schemaCounters[prefix]}`;
+        setSchemaCounters(prev => ({ ...prev, [prefix]: prev[prefix] + 1 }));
+        setSchema(prev => ({
+            ...prev,
+            [section]: { ...prev[section], [key]: { ...defaults } }
+        }));
+    }
+
+    function updateSchemaItem(section, key, updates) {
+        setSchema(prev => ({
+            ...prev,
+            [section]: {
+                ...prev[section],
+                [key]: { ...prev[section][key], ...updates }
+            }
+        }));
+    }
+
+    function removeSchemaItem(section, key) {
+        setSchema(prev => {
+            const copy = { ...prev[section] };
+            delete copy[key];
+            // Also remove match rule if entity is removed
+            if (section === "entities") {
+                const matchCopy = { ...prev.match };
+                delete matchCopy[key];
+                return { ...prev, [section]: copy, match: matchCopy };
+            }
+            return { ...prev, [section]: copy };
+        });
+    }
+
+    function updateMatchRule(entityKey, updates) {
+        setSchema(prev => ({
+            ...prev,
+            match: {
+                ...prev.match,
+                [entityKey]: { ...prev.match[entityKey], ...updates }
+            }
+        }));
+    }
+
+    function removeMatchRule(entityKey) {
+        setSchema(prev => {
+            const copy = { ...prev.match };
+            delete copy[entityKey];
+            return { ...prev, match: copy };
+        });
+    }
+
+    // Symbol ID options for dropdowns
+    const entitySymbolIds = Object.keys(schema.entities);
+    const claimSymbolIds = Object.keys(schema.claims);
+
     // === Formulas ===
     function addFormula(isNew = false) {
         setFormulas(prev => [
@@ -469,12 +545,6 @@ export default function ImportPage() {
 
     // === Import ===
     async function runImport() {
-        const fields = mappings.filter(m => m.target);
-        if (fields.length === 0) {
-            alert("Debes mapear al menos un campo.");
-            return;
-        }
-
         setImporting(true);
         setProgress(10);
         setProgressText(`Enviando ${allRows.length} filas...`);
@@ -490,14 +560,41 @@ export default function ImportPage() {
                     isNew: f.isNew || false,
                 }));
 
-            const payload = {
-                targetCollection,
-                rows: allRows,
-                formulas: serverFormulas,
-                fields: fields.map(f => ({ source: f.source, target: f.target, transform: f.transform })),
-                useBatch: insertMode === "batch",
-                batchSize: 50,
-            };
+            let payload;
+
+            if (importMode === "schema") {
+                // Validate schema has at least one entity
+                if (Object.keys(schema.entities).length === 0) {
+                    alert("Define al menos una entidad en el esquema.");
+                    setImporting(false);
+                    return;
+                }
+
+                payload = {
+                    mode: "schema",
+                    rows: allRows,
+                    formulas: serverFormulas,
+                    schema: schema,
+                };
+            } else {
+                // Flat mode
+                const fields = mappings.filter(m => m.target);
+                if (fields.length === 0) {
+                    alert("Debes mapear al menos un campo.");
+                    setImporting(false);
+                    return;
+                }
+
+                payload = {
+                    mode: "flat",
+                    targetCollection,
+                    rows: allRows,
+                    formulas: serverFormulas,
+                    fields: fields.map(f => ({ source: f.source, target: f.target, transform: f.transform })),
+                    useBatch: insertMode === "batch",
+                    batchSize: 50,
+                };
+            }
 
             setProgress(30);
             setProgressText("Procesando importación en el servidor...");
@@ -642,8 +739,31 @@ export default function ImportPage() {
                             </div>
                         )}
 
-                        {/* Config */}
+                        {/* Import Mode Toggle */}
                         {showConfig && (
+                            <div className="import-section">
+                                <h3>📦 Modo de importación</h3>
+                                <div className="schema-mode-toggle">
+                                    <button
+                                        className={`schema-mode-btn ${importMode === "flat" ? "active" : ""}`}
+                                        onClick={() => setImportMode("flat")}
+                                    >
+                                        <strong>📋 Plano</strong>
+                                        <span>Importar filas a una colección</span>
+                                    </button>
+                                    <button
+                                        className={`schema-mode-btn ${importMode === "schema" ? "active" : ""}`}
+                                        onClick={() => setImportMode("schema")}
+                                    >
+                                        <strong>🧩 Esquema</strong>
+                                        <span>Crear entidades + claims + qualifiers + refs</span>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Config (flat mode only) */}
+                        {showConfig && importMode === "flat" && (
                             <div className="import-section">
                                 <h3>⚙️ Configuración</h3>
                                 <div className="config-row">
@@ -826,8 +946,344 @@ export default function ImportPage() {
                             </div>
                         )}
 
-                        {/* Mapping */}
-                        {showConfig && (
+                        {/* ========== SCHEMA BUILDER (schema mode) ========== */}
+                        {showConfig && importMode === "schema" && (
+                            <div className="import-section schema-builder">
+                                <h3>🧩 Esquema de importación</h3>
+                                <p style={{ color: "#72777d", fontSize: "0.8125rem", marginBottom: "0.75rem" }}>
+                                    Define la estructura: por cada fila del archivo se crean entidades, claims, qualifiers y referencias.
+                                    Usa expresiones con <code>row.columna</code> y funciones como <code>TRIM()</code>, <code>CONCAT()</code>.
+                                </p>
+
+                                {/* --- Entities --- */}
+                                <div className="schema-section">
+                                    <h4>🏷️ Entidades</h4>
+                                    {Object.entries(schema.entities).map(([key, ent]) => (
+                                        <div key={key} className="schema-card">
+                                            <div className="schema-card-header">
+                                                <span className="schema-badge entity">{key}</span>
+                                                <button className="transform-remove" onClick={() => removeSchemaItem("entities", key)}>×</button>
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>label</label>
+                                                <input type="text" className="transform-input transform-expression"
+                                                    value={ent.label || ""} onChange={e => updateSchemaItem("entities", key, { label: e.target.value })}
+                                                    placeholder="row.nombre" />
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>description</label>
+                                                <input type="text" className="transform-input transform-expression"
+                                                    value={ent.description || ""} onChange={e => updateSchemaItem("entities", key, { description: e.target.value })}
+                                                    placeholder="row.descripcion" />
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>aliases</label>
+                                                <input type="text" className="transform-input transform-expression"
+                                                    value={ent.aliases || ""} onChange={e => updateSchemaItem("entities", key, { aliases: e.target.value })}
+                                                    placeholder="[row.alias1, row.alias2].filter(Boolean)" />
+                                            </div>
+
+                                            {/* Match rule */}
+                                            {schema.match[key] ? (
+                                                <div className="schema-match-rule">
+                                                    <div className="schema-field-row">
+                                                        <label>🔍 Match by</label>
+                                                        <select value={schema.match[key].by || "label"}
+                                                            onChange={e => updateMatchRule(key, { by: e.target.value })}>
+                                                            <option value="label">Solo label</option>
+                                                            <option value="property">Solo propiedad</option>
+                                                            <option value="label+property">Label + Propiedad</option>
+                                                        </select>
+                                                        <button className="transform-remove" onClick={() => removeMatchRule(key)} title="Quitar match">×</button>
+                                                    </div>
+                                                    {(schema.match[key].by === "property" || schema.match[key].by === "label+property") && (
+                                                        <>
+                                                            <div className="schema-field-row">
+                                                                <label>property ID</label>
+                                                                <input type="text" className="transform-input transform-expression"
+                                                                    value={schema.match[key].property || ""} onChange={e => updateMatchRule(key, { property: e.target.value })}
+                                                                    placeholder="'P_CI'" />
+                                                            </div>
+                                                            <div className="schema-field-row">
+                                                                <label>value</label>
+                                                                <input type="text" className="transform-input transform-expression"
+                                                                    value={schema.match[key].value || ""} onChange={e => updateMatchRule(key, { value: e.target.value })}
+                                                                    placeholder="row.ci" />
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <button className="btn btn-sm" style={{ marginTop: "0.25rem", fontSize: "0.75rem" }}
+                                                    onClick={() => updateMatchRule(key, { by: "label" })}>
+                                                    + Agregar regla de match
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <button className="btn btn-secondary btn-sm"
+                                        onClick={() => addSchemaItem("entities", "entity", { label: "", description: "", aliases: "" })}>
+                                        + Agregar entidad
+                                    </button>
+                                </div>
+
+                                {/* --- Claims --- */}
+                                <div className="schema-section">
+                                    <h4>📝 Claims</h4>
+                                    {Object.entries(schema.claims).map(([key, cl]) => (
+                                        <div key={key} className="schema-card">
+                                            <div className="schema-card-header">
+                                                <span className="schema-badge claim">{key}</span>
+                                                <button className="transform-remove" onClick={() => removeSchemaItem("claims", key)}>×</button>
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>subject</label>
+                                                <select className="transform-select" value={cl.subject || ""}
+                                                    onChange={e => updateSchemaItem("claims", key, { subject: e.target.value })}>
+                                                    <option value="">— seleccionar entidad —</option>
+                                                    {entitySymbolIds.map(id => <option key={id} value={id}>{id}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>property</label>
+                                                <input type="text" className="transform-input transform-expression"
+                                                    value={cl.property || ""} onChange={e => updateSchemaItem("claims", key, { property: e.target.value })}
+                                                    placeholder="'P_CI'" />
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>datatype</label>
+                                                <select className="transform-select" value={cl.datatype || "'string'"}
+                                                    onChange={e => updateSchemaItem("claims", key, { datatype: e.target.value })}>
+                                                    <option value="'string'">string</option>
+                                                    <option value="'number'">number</option>
+                                                    <option value="'date'">date</option>
+                                                    <option value="'boolean'">boolean</option>
+                                                    <option value="'relation'">relation</option>
+                                                    <option value="'json'">json</option>
+                                                </select>
+                                            </div>
+                                            {cl.datatype === "'relation'" ? (
+                                                <div className="schema-field-row">
+                                                    <label>value_relation</label>
+                                                    <input type="text" className="transform-input transform-expression"
+                                                        value={cl.value_relation || ""} onChange={e => updateSchemaItem("claims", key, { value_relation: e.target.value })}
+                                                        placeholder="entity-0 o row.ref_entity_id" />
+                                                </div>
+                                            ) : (
+                                                <div className="schema-field-row">
+                                                    <label>value_raw</label>
+                                                    <input type="text" className="transform-input transform-expression"
+                                                        value={cl.value_raw || ""} onChange={e => updateSchemaItem("claims", key, { value_raw: e.target.value })}
+                                                        placeholder="row.ci" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <button className="btn btn-secondary btn-sm"
+                                        onClick={() => addSchemaItem("claims", "claim", { subject: entitySymbolIds[0] || "", property: "", datatype: "'string'", value_raw: "", value_relation: "" })}>
+                                        + Agregar claim
+                                    </button>
+                                </div>
+
+                                {/* --- Qualifiers --- */}
+                                <div className="schema-section">
+                                    <h4>📎 Qualifiers</h4>
+                                    {Object.entries(schema.qualifiers).map(([key, qual]) => (
+                                        <div key={key} className="schema-card">
+                                            <div className="schema-card-header">
+                                                <span className="schema-badge qualifier">{key}</span>
+                                                <button className="transform-remove" onClick={() => removeSchemaItem("qualifiers", key)}>×</button>
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>claim</label>
+                                                <select className="transform-select" value={qual.claim || ""}
+                                                    onChange={e => updateSchemaItem("qualifiers", key, { claim: e.target.value })}>
+                                                    <option value="">— seleccionar claim —</option>
+                                                    {claimSymbolIds.map(id => <option key={id} value={id}>{id}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>property</label>
+                                                <input type="text" className="transform-input transform-expression"
+                                                    value={qual.property || ""} onChange={e => updateSchemaItem("qualifiers", key, { property: e.target.value })}
+                                                    placeholder="'P_FECHA'" />
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>datatype</label>
+                                                <select className="transform-select" value={qual.datatype || "'string'"}
+                                                    onChange={e => updateSchemaItem("qualifiers", key, { datatype: e.target.value })}>
+                                                    <option value="'string'">string</option>
+                                                    <option value="'number'">number</option>
+                                                    <option value="'date'">date</option>
+                                                    <option value="'boolean'">boolean</option>
+                                                    <option value="'relation'">relation</option>
+                                                </select>
+                                            </div>
+                                            {qual.datatype === "'relation'" ? (
+                                                <div className="schema-field-row">
+                                                    <label>value_relation</label>
+                                                    <input type="text" className="transform-input transform-expression"
+                                                        value={qual.value_relation || ""} onChange={e => updateSchemaItem("qualifiers", key, { value_relation: e.target.value })}
+                                                        placeholder="entity-0 o row.ref_id" />
+                                                </div>
+                                            ) : (
+                                                <div className="schema-field-row">
+                                                    <label>value_raw</label>
+                                                    <input type="text" className="transform-input transform-expression"
+                                                        value={qual.value_raw || ""} onChange={e => updateSchemaItem("qualifiers", key, { value_raw: e.target.value })}
+                                                        placeholder="row.fecha_inicio" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <button className="btn btn-secondary btn-sm"
+                                        onClick={() => addSchemaItem("qualifiers", "qual", { claim: claimSymbolIds[0] || "", property: "", datatype: "'string'", value_raw: "" })}>
+                                        + Agregar qualifier
+                                    </button>
+                                </div>
+
+                                {/* --- References --- */}
+                                <div className="schema-section">
+                                    <h4>📚 References</h4>
+                                    {Object.entries(schema.references).map(([key, ref]) => (
+                                        <div key={key} className="schema-card">
+                                            <div className="schema-card-header">
+                                                <span className="schema-badge reference">{key}</span>
+                                                <button className="transform-remove" onClick={() => removeSchemaItem("references", key)}>×</button>
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>claim</label>
+                                                <select className="transform-select" value={ref.claim || ""}
+                                                    onChange={e => updateSchemaItem("references", key, { claim: e.target.value })}>
+                                                    <option value="">— seleccionar claim —</option>
+                                                    {claimSymbolIds.map(id => <option key={id} value={id}>{id}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>reference</label>
+                                                <input type="text" className="transform-input transform-expression"
+                                                    value={ref.reference || ""} onChange={e => updateSchemaItem("references", key, { reference: e.target.value })}
+                                                    placeholder="entity-0 o row.ref_entity_id" />
+                                            </div>
+                                            <div className="schema-field-row">
+                                                <label>details</label>
+                                                <input type="text" className="transform-input transform-expression"
+                                                    value={ref.details || ""} onChange={e => updateSchemaItem("references", key, { details: e.target.value })}
+                                                    placeholder="CONCAT('Fuente: ', row.fuente)" />
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <button className="btn btn-secondary btn-sm"
+                                        onClick={() => addSchemaItem("references", "ref", { claim: claimSymbolIds[0] || "", reference: "", details: "" })}>
+                                        + Agregar referencia
+                                    </button>
+                                </div>
+
+                                {/* Schema JSON editor + load/download */}
+                                <div className="schema-json-section">
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                                        <h4 style={{ margin: 0 }}>📄 JSON del esquema</h4>
+                                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                                            <button className="btn btn-secondary btn-sm" onClick={() => schemaFileRef.current?.click()}>
+                                                📂 Cargar JSON
+                                            </button>
+                                            <input type="file" ref={schemaFileRef} accept=".json" style={{ display: "none" }}
+                                                onChange={e => {
+                                                    const file = e.target.files?.[0];
+                                                    if (!file) return;
+                                                    const reader = new FileReader();
+                                                    reader.onload = (ev) => {
+                                                        try {
+                                                            const loaded = JSON.parse(ev.target.result);
+                                                            setSchema(prev => ({
+                                                                entities: loaded.entities || prev.entities,
+                                                                match: loaded.match || prev.match,
+                                                                claims: loaded.claims || prev.claims,
+                                                                qualifiers: loaded.qualifiers || prev.qualifiers,
+                                                                references: loaded.references || prev.references,
+                                                            }));
+                                                            // Update counters based on loaded keys
+                                                            const countMax = (obj, prefix) => {
+                                                                let max = 0;
+                                                                for (const k of Object.keys(obj || {})) {
+                                                                    const n = parseInt(k.split("-").pop());
+                                                                    if (!isNaN(n) && n >= max) max = n + 1;
+                                                                }
+                                                                return max;
+                                                            };
+                                                            setSchemaCounters({
+                                                                entity: countMax(loaded.entities),
+                                                                claim: countMax(loaded.claims),
+                                                                qual: countMax(loaded.qualifiers),
+                                                                ref: countMax(loaded.references),
+                                                            });
+                                                            setSchemaJsonText(JSON.stringify(loaded, null, 2));
+                                                        } catch (err) {
+                                                            alert("JSON inválido: " + err.message);
+                                                        }
+                                                    };
+                                                    reader.readAsText(file);
+                                                    e.target.value = "";
+                                                }}
+                                            />
+                                            <button className="btn btn-secondary btn-sm" onClick={() => {
+                                                const blob = new Blob([JSON.stringify(schema, null, 2)], { type: "application/json" });
+                                                const url = URL.createObjectURL(blob);
+                                                const a = document.createElement("a");
+                                                a.href = url; a.download = "import-schema.json"; a.click();
+                                                URL.revokeObjectURL(url);
+                                            }}>
+                                                💾 Descargar config
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <textarea
+                                        className="schema-json-editor"
+                                        value={schemaJsonText}
+                                        onChange={e => setSchemaJsonText(e.target.value)}
+                                        rows={12}
+                                    />
+                                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                                        <button className="btn btn-primary btn-sm" onClick={() => {
+                                            try {
+                                                const parsed = JSON.parse(schemaJsonText);
+                                                setSchema({
+                                                    entities: parsed.entities || {},
+                                                    match: parsed.match || {},
+                                                    claims: parsed.claims || {},
+                                                    qualifiers: parsed.qualifiers || {},
+                                                    references: parsed.references || {},
+                                                });
+                                                const countMax = (obj) => {
+                                                    let max = 0;
+                                                    for (const k of Object.keys(obj || {})) {
+                                                        const n = parseInt(k.split("-").pop());
+                                                        if (!isNaN(n) && n >= max) max = n + 1;
+                                                    }
+                                                    return max;
+                                                };
+                                                setSchemaCounters({
+                                                    entity: countMax(parsed.entities),
+                                                    claim: countMax(parsed.claims),
+                                                    qual: countMax(parsed.qualifiers),
+                                                    ref: countMax(parsed.references),
+                                                });
+                                            } catch (err) {
+                                                alert("JSON inválido: " + err.message);
+                                            }
+                                        }}>
+                                            ✅ Aplicar JSON
+                                        </button>
+                                        <button className="btn btn-secondary btn-sm" onClick={() => setSchemaJsonText(JSON.stringify(schema, null, 2))}>
+                                            🔄 Sincronizar desde UI
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Mapping (flat mode only) */}
+                        {showConfig && importMode === "flat" && (
                             <div className="import-section">
                                 <h3>🔗 Mapeo de campos</h3>
                                 <p style={{ color: "#72777d", fontSize: "0.8125rem", marginBottom: "0.75rem" }}>
@@ -895,32 +1351,72 @@ export default function ImportPage() {
                                 {result.success ? (
                                     <div className="result-box success">
                                         <h3 className="result-title-success">✅ Importación completada</h3>
-                                        <div className="result-stats">
-                                            <div className="stat">
-                                                <div className="stat-value">{result.total}</div>
-                                                <div className="stat-label">Total</div>
-                                            </div>
-                                            <div className="stat">
-                                                <div className="stat-value stat-value-success">{result.created}</div>
-                                                <div className="stat-label">Creados</div>
-                                            </div>
-                                            <div className="stat">
-                                                <div className={`stat-value ${result.errors?.length ? "stat-value-error" : "stat-value-dim"}`}>
-                                                    {result.errors?.length || 0}
-                                                </div>
-                                                <div className="stat-label">Errores</div>
-                                            </div>
-                                        </div>
 
-                                        {result.documents?.length > 0 && (
-                                            <div className="download-actions">
-                                                <button className="btn btn-secondary" onClick={downloadCsv}>
-                                                    📥 Descargar CSV con $id
-                                                </button>
-                                                <button className="btn btn-secondary" onClick={downloadJson}>
-                                                    📥 Descargar JSON con $id
-                                                </button>
+                                        {result.mode === "schema" ? (
+                                            /* Schema mode results */
+                                            <div className="result-stats">
+                                                <div className="stat">
+                                                    <div className="stat-value">{result.total}</div>
+                                                    <div className="stat-label">Filas</div>
+                                                </div>
+                                                <div className="stat">
+                                                    <div className="stat-value stat-value-success">{result.entities || 0}</div>
+                                                    <div className="stat-label">Entidades</div>
+                                                </div>
+                                                <div className="stat">
+                                                    <div className="stat-value" style={{ color: "#3366cc" }}>{result.matched || 0}</div>
+                                                    <div className="stat-label">Matches</div>
+                                                </div>
+                                                <div className="stat">
+                                                    <div className="stat-value stat-value-success">{result.claims || 0}</div>
+                                                    <div className="stat-label">Claims</div>
+                                                </div>
+                                                <div className="stat">
+                                                    <div className="stat-value stat-value-success">{result.qualifiers || 0}</div>
+                                                    <div className="stat-label">Qualifiers</div>
+                                                </div>
+                                                <div className="stat">
+                                                    <div className="stat-value stat-value-success">{result.references || 0}</div>
+                                                    <div className="stat-label">Referencias</div>
+                                                </div>
+                                                <div className="stat">
+                                                    <div className={`stat-value ${result.errors?.length ? "stat-value-error" : "stat-value-dim"}`}>
+                                                        {result.errors?.length || 0}
+                                                    </div>
+                                                    <div className="stat-label">Errores</div>
+                                                </div>
                                             </div>
+                                        ) : (
+                                            /* Flat mode results */
+                                            <>
+                                                <div className="result-stats">
+                                                    <div className="stat">
+                                                        <div className="stat-value">{result.total}</div>
+                                                        <div className="stat-label">Total</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className="stat-value stat-value-success">{result.created}</div>
+                                                        <div className="stat-label">Creados</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className={`stat-value ${result.errors?.length ? "stat-value-error" : "stat-value-dim"}`}>
+                                                            {result.errors?.length || 0}
+                                                        </div>
+                                                        <div className="stat-label">Errores</div>
+                                                    </div>
+                                                </div>
+
+                                                {result.documents?.length > 0 && (
+                                                    <div className="download-actions">
+                                                        <button className="btn btn-secondary" onClick={downloadCsv}>
+                                                            📥 Descargar CSV con $id
+                                                        </button>
+                                                        <button className="btn btn-secondary" onClick={downloadJson}>
+                                                            📥 Descargar JSON con $id
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </>
                                         )}
 
                                         {result.errors?.length > 0 && (
