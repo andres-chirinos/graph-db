@@ -221,6 +221,294 @@ function applyFormulas(rows, formulas, log) {
 }
 
 // ============================================
+// SCHEMA-BASED IMPORT ENGINE
+// ============================================
+
+/**
+ * Search for an existing entity that matches the given criteria.
+ * @param {sdk.Databases} databases
+ * @param {Object} matchRule - { by, label, property, value }
+ * @param {Function} log
+ * @returns {Promise<string|null>} - Existing entity $id or null
+ */
+async function matchEntity(databases, matchRule, log) {
+    if (!matchRule || !matchRule.by) return null;
+
+    try {
+        const by = matchRule.by; // "label", "property", "label+property"
+        let candidateIds = null;
+
+        // Search by label
+        if (by === "label" || by === "label+property") {
+            const labelVal = matchRule.label;
+            if (!labelVal) return null;
+            const res = await databases.listDocuments(DATABASE_ID, "entities", [
+                sdk.Query.equal("label", String(labelVal)),
+                sdk.Query.limit(50),
+            ]);
+            candidateIds = new Set(res.documents.map(d => d.$id));
+            if (candidateIds.size === 0) return null;
+        }
+
+        // Search by property value
+        if (by === "property" || by === "label+property") {
+            const propId = matchRule.property;
+            const propVal = matchRule.value;
+            if (!propId || propVal === undefined || propVal === null) return null;
+
+            const claimRes = await databases.listDocuments(DATABASE_ID, "claims", [
+                sdk.Query.equal("property", String(propId)),
+                sdk.Query.equal("value_raw", String(propVal)),
+                sdk.Query.limit(100),
+            ]);
+
+            const propIds = new Set(claimRes.documents.map(d => d.subject));
+
+            if (by === "label+property" && candidateIds) {
+                // Intersect: must match BOTH label and property
+                const intersection = [...candidateIds].filter(id => propIds.has(id));
+                return intersection.length > 0 ? intersection[0] : null;
+            } else {
+                return propIds.size > 0 ? [...propIds][0] : null;
+            }
+        }
+
+        // Label-only match
+        if (by === "label" && candidateIds && candidateIds.size > 0) {
+            return [...candidateIds][0];
+        }
+
+        return null;
+    } catch (e) {
+        if (log) log(`Match error: ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * Process a single row through the schema definition.
+ * Creates entities, claims, qualifiers, and references.
+ * Returns maps of symbolId → realId for all created/matched documents.
+ */
+async function processSchemaForRow(databases, schema, row, rowIndex, log) {
+    const entityMap = {};  // "entity-0" → real $id
+    const claimMap = {};   // "claim-0" → real $id
+    const results = { entities: 0, claims: 0, qualifiers: 0, references: 0, matched: 0, errors: [] };
+
+    if (log) log(`── Row ${rowIndex} ──────────────────────────`);
+
+    // --- Phase 1: Entities ---
+    if (schema.entities) {
+        for (const [symbolId, entityDef] of Object.entries(schema.entities)) {
+            try {
+                const label = entityDef.label ? String(evalFormula(entityDef.label, "", row, rowIndex)) : "";
+                const description = entityDef.description ? String(evalFormula(entityDef.description, "", row, rowIndex)) : "";
+                let aliases = [];
+                if (entityDef.aliases) {
+                    const aliasResult = evalFormula(entityDef.aliases, "", row, rowIndex);
+                    aliases = Array.isArray(aliasResult) ? aliasResult.map(String).filter(Boolean) : [];
+                }
+
+                if (log) log(`  [Entity] ${symbolId}: label="${label}", desc="${description}", aliases=[${aliases.join(", ")}]`);
+
+                // Check for match rule
+                let existingId = null;
+                if (schema.match && schema.match[symbolId]) {
+                    const matchDef = schema.match[symbolId];
+                    const matchRule = {
+                        by: matchDef.by,
+                        label: matchDef.label ? evalFormula(matchDef.label, "", row, rowIndex) : label,
+                        property: matchDef.property ? String(evalFormula(matchDef.property, "", row, rowIndex)) : undefined,
+                        value: matchDef.value ? String(evalFormula(matchDef.value, "", row, rowIndex)) : undefined,
+                    };
+                    if (log) log(`  [Match] ${symbolId}: by="${matchRule.by}", label="${matchRule.label}", property="${matchRule.property}", value="${matchRule.value}"`);
+                    existingId = await matchEntity(databases, matchRule, log);
+                    if (log) log(`  [Match] ${symbolId}: result=${existingId || "(no match)"}`);
+                }
+
+                if (existingId) {
+                    entityMap[symbolId] = existingId;
+                    results.matched++;
+                    if (log) log(`  [Entity] ${symbolId} → MATCHED existing ${existingId}`);
+                } else {
+                    const doc = await databases.createDocument(
+                        DATABASE_ID, "entities", sdk.ID.unique(),
+                        { label, description, aliases }
+                    );
+                    entityMap[symbolId] = doc.$id;
+                    results.entities++;
+                    if (log) log(`  [Entity] ${symbolId} → CREATED ${doc.$id}`);
+                }
+            } catch (e) {
+                if (log) log(`  [Entity] ${symbolId} → ERROR: ${e.message}`);
+                results.errors.push({ row: rowIndex, phase: "entity", symbolId, error: e.message });
+            }
+        }
+    }
+
+    // --- Phase 2: Claims ---
+    if (schema.claims) {
+        for (const [symbolId, claimDef] of Object.entries(schema.claims)) {
+            try {
+                // Resolve subject: could be a symbolic entity ID or a literal expression
+                let subject = claimDef.subject ? String(evalFormula(claimDef.subject, "", row, rowIndex)) : "";
+                const subjectOriginal = subject;
+                if (entityMap[subject]) subject = entityMap[subject];
+
+                const property = claimDef.property ? String(evalFormula(claimDef.property, "", row, rowIndex)) : "";
+                const datatype = claimDef.datatype ? String(evalFormula(claimDef.datatype, "", row, rowIndex)) : "string";
+                const value_raw = claimDef.value_raw ? String(evalFormula(claimDef.value_raw, "", row, rowIndex)) : null;
+
+                let value_relation = null;
+                if (claimDef.value_relation) {
+                    value_relation = String(evalFormula(claimDef.value_relation, "", row, rowIndex));
+                    if (entityMap[value_relation]) value_relation = entityMap[value_relation];
+                }
+
+                if (log) log(`  [Claim] ${symbolId}: subject=${subjectOriginal}→${subject}, prop="${property}", type="${datatype}", raw="${value_raw}", rel="${value_relation}"`);
+
+                // Skip empty claims
+                if (!subject || !property) {
+                    if (log) log(`  [Claim] ${symbolId} → SKIPPED (empty subject or property)`);
+                    continue;
+                }
+
+                const doc = await databases.createDocument(
+                    DATABASE_ID, "claims", sdk.ID.unique(),
+                    { subject, property, datatype, value_raw, value_relation }
+                );
+                claimMap[symbolId] = doc.$id;
+                results.claims++;
+                if (log) log(`  [Claim] ${symbolId} → CREATED ${doc.$id}`);
+            } catch (e) {
+                if (log) log(`  [Claim] ${symbolId} → ERROR: ${e.message}`);
+                results.errors.push({ row: rowIndex, phase: "claim", symbolId, error: e.message });
+            }
+        }
+    }
+
+    // --- Phase 3: Qualifiers ---
+    if (schema.qualifiers) {
+        for (const [symbolId, qualDef] of Object.entries(schema.qualifiers)) {
+            try {
+                let claim = qualDef.claim ? String(evalFormula(qualDef.claim, "", row, rowIndex)) : "";
+                const claimOriginal = claim;
+                if (claimMap[claim]) claim = claimMap[claim];
+
+                const property = qualDef.property ? String(evalFormula(qualDef.property, "", row, rowIndex)) : "";
+                const datatype = qualDef.datatype ? String(evalFormula(qualDef.datatype, "", row, rowIndex)) : "string";
+                const value_raw = qualDef.value_raw ? String(evalFormula(qualDef.value_raw, "", row, rowIndex)) : null;
+
+                let value_relation = null;
+                if (qualDef.value_relation) {
+                    value_relation = String(evalFormula(qualDef.value_relation, "", row, rowIndex));
+                    if (entityMap[value_relation]) value_relation = entityMap[value_relation];
+                }
+
+                if (log) log(`  [Qualifier] ${symbolId}: claim=${claimOriginal}→${claim}, prop="${property}", type="${datatype}", raw="${value_raw}", rel="${value_relation}"`);
+
+                if (!claim || !property) {
+                    if (log) log(`  [Qualifier] ${symbolId} → SKIPPED (empty claim or property)`);
+                    continue;
+                }
+
+                await databases.createDocument(
+                    DATABASE_ID, "qualifiers", sdk.ID.unique(),
+                    { claim, property, datatype, value_raw, value_relation }
+                );
+                results.qualifiers++;
+                if (log) log(`  [Qualifier] ${symbolId} → CREATED`);
+            } catch (e) {
+                if (log) log(`  [Qualifier] ${symbolId} → ERROR: ${e.message}`);
+                results.errors.push({ row: rowIndex, phase: "qualifier", symbolId, error: e.message });
+            }
+        }
+    }
+
+    // --- Phase 4: References ---
+    if (schema.references) {
+        for (const [symbolId, refDef] of Object.entries(schema.references)) {
+            try {
+                let claim = refDef.claim ? String(evalFormula(refDef.claim, "", row, rowIndex)) : "";
+                const claimOriginal = claim;
+                if (claimMap[claim]) claim = claimMap[claim];
+
+                let reference = refDef.reference ? String(evalFormula(refDef.reference, "", row, rowIndex)) : null;
+                const refOriginal = reference;
+                if (reference && entityMap[reference]) reference = entityMap[reference];
+
+                const details = refDef.details ? String(evalFormula(refDef.details, "", row, rowIndex)) : null;
+
+                if (log) log(`  [Reference] ${symbolId}: claim=${claimOriginal}→${claim}, ref=${refOriginal}→${reference}, details="${details}"`);
+
+                if (!claim) {
+                    if (log) log(`  [Reference] ${symbolId} → SKIPPED (empty claim)`);
+                    continue;
+                }
+
+                await databases.createDocument(
+                    DATABASE_ID, "references", sdk.ID.unique(),
+                    { claim, reference, details }
+                );
+                results.references++;
+                if (log) log(`  [Reference] ${symbolId} → CREATED`);
+            } catch (e) {
+                if (log) log(`  [Reference] ${symbolId} → ERROR: ${e.message}`);
+                results.errors.push({ row: rowIndex, phase: "reference", symbolId, error: e.message });
+            }
+        }
+    }
+
+    if (log) log(`  [Summary] Row ${rowIndex}: ${results.entities} entities, ${results.claims} claims, ${results.qualifiers} qualifiers, ${results.references} refs, ${results.matched} matched, ${results.errors.length} errors`);
+
+    return { entityMap, claimMap, results };
+}
+
+/**
+ * Process all rows through a schema definition.
+ * @param {sdk.Databases} databases
+ * @param {Object} schema - { entities, match, claims, qualifiers, references }
+ * @param {Array} rows - Parsed data rows
+ * @param {Function} log
+ */
+async function processSchema(databases, schema, rows, log) {
+    const totals = { entities: 0, claims: 0, qualifiers: 0, references: 0, matched: 0, errors: [] };
+
+    // Log schema summary
+    const entityCount = Object.keys(schema.entities || {}).length;
+    const matchCount = Object.keys(schema.match || {}).length;
+    const claimCount = Object.keys(schema.claims || {}).length;
+    const qualCount = Object.keys(schema.qualifiers || {}).length;
+    const refCount = Object.keys(schema.references || {}).length;
+    log(`╔══════════════════════════════════════════════╗`);
+    log(`║ Schema Import: ${rows.length} rows`);
+    log(`║ Definitions: ${entityCount} entities (${matchCount} with match), ${claimCount} claims, ${qualCount} qualifiers, ${refCount} references`);
+    log(`╚══════════════════════════════════════════════╝`);
+
+    const startTime = Date.now();
+
+    for (let i = 0; i < rows.length; i++) {
+        const { results } = await processSchemaForRow(databases, schema, rows[i], i, log);
+        totals.entities += results.entities;
+        totals.claims += results.claims;
+        totals.qualifiers += results.qualifiers;
+        totals.references += results.references;
+        totals.matched += results.matched;
+        totals.errors.push(...results.errors);
+
+        if ((i + 1) % 10 === 0 || i === rows.length - 1) {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            log(`⏱ Progress: ${i + 1}/${rows.length} rows (${elapsed}s) — ${totals.entities} entities, ${totals.claims} claims, ${totals.matched} matched, ${totals.errors.length} errors`);
+        }
+    }
+
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    log(`✅ Schema import complete in ${totalTime}s — ${totals.entities} entities, ${totals.claims} claims, ${totals.qualifiers} qualifiers, ${totals.references} references, ${totals.matched} matched, ${totals.errors.length} errors`);
+
+    return totals;
+}
+
+// ============================================
 // ROW MAPPING
 // ============================================
 
@@ -406,6 +694,7 @@ module.exports = async ({ req, res, log, error }) => {
             }
 
             const {
+                mode = "flat",       // "flat" or "schema"
                 targetCollection = "entities",
                 format = "csv",
                 hasHeader = true,
@@ -413,6 +702,7 @@ module.exports = async ({ req, res, log, error }) => {
                 dataPath = "",
                 skipRows = 0,
                 formulas = [],
+                schema,              // schema mode: { entities, match, claims, qualifiers, references }
                 fields = [],
                 csvData,
                 jsonData,
@@ -421,6 +711,92 @@ module.exports = async ({ req, res, log, error }) => {
                 batchSize = 50,
             } = body;
 
+            // --- Parse data (shared between both modes) ---
+            let parsedRows = [];
+            let parsedHeaders = [];
+
+            if (preRows && Array.isArray(preRows)) {
+                parsedRows = preRows;
+                parsedHeaders = preRows.length > 0 ? Object.keys(preRows[0]) : [];
+            } else if (csvData) {
+                const result = parseCsvString(csvData, { hasHeader, delimiter });
+                parsedRows = skipRows > 0 ? result.rows.slice(skipRows) : result.rows;
+                parsedHeaders = result.headers;
+            } else if (jsonData) {
+                const dataStr = typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData);
+                const result = parseJsonString(dataStr, dataPath || undefined);
+                parsedRows = skipRows > 0 ? result.rows.slice(skipRows) : result.rows;
+                parsedHeaders = result.headers;
+            } else {
+                return res.json({
+                    error: 'No data provided. Send "csvData" (string), "jsonData", or "rows" (array).',
+                }, 400);
+            }
+
+            if (parsedRows.length === 0) {
+                return res.json({
+                    error: 'No rows found in the provided data.',
+                    headers: parsedHeaders,
+                }, 400);
+            }
+
+            // Apply formulas (shared between both modes)
+            if (formulas.length > 0) {
+                log(`Applying ${formulas.length} formula(s)...`);
+                parsedRows = applyFormulas(parsedRows, formulas, log);
+                log(`Formulas applied. Row count: ${parsedRows.length}`);
+            }
+
+            // Initialize Appwrite client (shared)
+            const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
+            const projectId = process.env.APPWRITE_PROJECT_ID || process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID;
+            const apiKey = req.headers['x-appwrite-key'] || process.env.APPWRITE_API_KEY;
+            const userJwt = req?.headers?.["x-appwrite-user-jwt"];
+
+            if (!endpoint || !projectId) {
+                return res.json({ error: 'Missing APPWRITE_ENDPOINT or APPWRITE_PROJECT_ID' }, 500);
+            }
+
+            const client = new sdk.Client()
+                .setEndpoint(endpoint)
+                .setProject(projectId);
+
+            if (userJwt) {
+                client.setJWT(userJwt);
+            } else if (apiKey) {
+                client.setKey(apiKey);
+            } else {
+                log("Warning: No API Key. Operations may fail due to permissions.");
+            }
+
+            const databases = new sdk.Databases(client);
+
+            // ===== SCHEMA MODE =====
+            if (mode === "schema") {
+                if (!schema || typeof schema !== "object") {
+                    return res.json({ error: 'Schema object is required for mode "schema".' }, 400);
+                }
+
+                log(`Schema import: ${parsedRows.length} rows`);
+                const schemaResult = await processSchema(databases, schema, parsedRows, log);
+
+                log(`Schema import complete: ${schemaResult.entities} entities, ${schemaResult.claims} claims, ${schemaResult.qualifiers} qualifiers, ${schemaResult.references} references, ${schemaResult.matched} matched, ${schemaResult.errors.length} errors`);
+
+                return res.json({
+                    success: true,
+                    mode: "schema",
+                    total: parsedRows.length,
+                    entities: schemaResult.entities,
+                    claims: schemaResult.claims,
+                    qualifiers: schemaResult.qualifiers,
+                    references: schemaResult.references,
+                    matched: schemaResult.matched,
+                    errors: schemaResult.errors.slice(0, 50),
+                    hasMoreErrors: schemaResult.errors.length > 50,
+                }, 200);
+            }
+
+            // ===== FLAT MODE (default) =====
             // Validate required fields
             if (!fields || !Array.isArray(fields) || fields.length === 0) {
                 return res.json({
@@ -452,70 +828,9 @@ module.exports = async ({ req, res, log, error }) => {
                 }, 400);
             }
 
-            // Parse data
-            let parsedRows = [];
-            let parsedHeaders = [];
-
-            if (preRows && Array.isArray(preRows)) {
-                parsedRows = preRows;
-                parsedHeaders = preRows.length > 0 ? Object.keys(preRows[0]) : [];
-            } else if (csvData) {
-                const result = parseCsvString(csvData, { hasHeader, delimiter });
-                // Apply skipRows: skip N data rows after header
-                parsedRows = skipRows > 0 ? result.rows.slice(skipRows) : result.rows;
-                parsedHeaders = result.headers;
-            } else if (jsonData) {
-                const dataStr = typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData);
-                const result = parseJsonString(dataStr, dataPath || undefined);
-                parsedRows = skipRows > 0 ? result.rows.slice(skipRows) : result.rows;
-                parsedHeaders = result.headers;
-            } else {
-                return res.json({
-                    error: 'No data provided. Send "csvData" (string), "jsonData", or "rows" (array).',
-                }, 400);
-            }
-
-            if (parsedRows.length === 0) {
-                return res.json({
-                    error: 'No rows found in the provided data.',
-                    headers: parsedHeaders,
-                }, 400);
-            }
-
             log(`Importing ${parsedRows.length} rows into "${targetCollection}"`);
 
-            // Apply formulas (before field mapping)
-            if (formulas.length > 0) {
-                log(`Applying ${formulas.length} formula(s)...`);
-                parsedRows = applyFormulas(parsedRows, formulas, log);
-                log(`Formulas applied. Row count: ${parsedRows.length}`);
-            }
-
-            // Initialize Appwrite client
-            const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
-            const projectId = process.env.APPWRITE_PROJECT_ID || process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID;
-            const apiKey = req.headers['x-appwrite-key'] || process.env.APPWRITE_API_KEY;
-            const userJwt = req?.headers?.["x-appwrite-user-jwt"];
-
-            if (!endpoint || !projectId) {
-                return res.json({ error: 'Missing APPWRITE_ENDPOINT or APPWRITE_PROJECT_ID' }, 500);
-            }
-
-            const client = new sdk.Client()
-                .setEndpoint(endpoint)
-                .setProject(projectId);
-
-            if (userJwt) {
-                client.setJWT(userJwt);
-            } else if (apiKey) {
-                client.setKey(apiKey);
-            } else {
-                log("Warning: No API Key. Operations may fail due to permissions.");
-            }
-
-            const databases = new sdk.Databases(client);
-
-            // Execute import
+            // Execute flat import
             const importResult = await importRows(databases, {
                 targetCollection,
                 fields,
@@ -527,6 +842,7 @@ module.exports = async ({ req, res, log, error }) => {
 
             return res.json({
                 success: true,
+                mode: "flat",
                 total: importResult.total,
                 created: importResult.created,
                 documents: importResult.documents,
