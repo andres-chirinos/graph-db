@@ -262,7 +262,7 @@ async function matchEntity(databases, matchRule, log) {
                 sdk.Query.limit(100),
             ]);
 
-            const propIds = new Set(claimRes.documents.map(d => d.subject));
+            const propIds = new Set(claimRes.documents.map(d => typeof d.subject === 'object' && d.subject !== null ? d.subject.$id : d.subject));
 
             if (by === "label+property" && candidateIds) {
                 // Intersect: must match BOTH label and property
@@ -369,10 +369,9 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
     if (schema.claims) {
         for (const [symbolId, claimDef] of Object.entries(schema.claims)) {
             try {
-                // Resolve subject: could be a symbolic entity ID or a literal expression
-                let subject = claimDef.subject ? String(evalFormula(claimDef.subject, "", row, rowIndex)) : "";
-                const subjectOriginal = subject;
-                if (entityMap[subject]) subject = entityMap[subject];
+                // Resolve subject: it is a symbolic entity ID
+                const subjectOriginal = claimDef.subject || "";
+                let subject = entityMap[subjectOriginal] || subjectOriginal;
 
                 const property = claimDef.property ? String(evalFormula(claimDef.property, "", row, rowIndex)) : "";
                 const datatype = claimDef.datatype ? String(evalFormula(claimDef.datatype, "", row, rowIndex)) : "string";
@@ -411,9 +410,9 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
     if (schema.qualifiers) {
         for (const [symbolId, qualDef] of Object.entries(schema.qualifiers)) {
             try {
-                let claim = qualDef.claim ? String(evalFormula(qualDef.claim, "", row, rowIndex)) : "";
-                const claimOriginal = claim;
-                if (claimMap[claim]) claim = claimMap[claim];
+                // Resolve claim symbol
+                const claimOriginal = qualDef.claim || "";
+                let claim = claimMap[claimOriginal] || claimOriginal;
 
                 const property = qualDef.property ? String(evalFormula(qualDef.property, "", row, rowIndex)) : "";
                 const datatype = qualDef.datatype ? String(evalFormula(qualDef.datatype, "", row, rowIndex)) : "string";
@@ -450,9 +449,9 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
     if (schema.references) {
         for (const [symbolId, refDef] of Object.entries(schema.references)) {
             try {
-                let claim = refDef.claim ? String(evalFormula(refDef.claim, "", row, rowIndex)) : "";
-                const claimOriginal = claim;
-                if (claimMap[claim]) claim = claimMap[claim];
+                // Resolve claim symbol
+                const claimOriginal = refDef.claim || "";
+                let claim = claimMap[claimOriginal] || claimOriginal;
 
                 let reference = refDef.reference ? String(evalFormula(refDef.reference, "", row, rowIndex)) : null;
                 const refOriginal = reference;
@@ -817,19 +816,14 @@ module.exports = async ({ req, res, log, error }) => {
                 log(`Schema import: ${parsedRows.length} rows`);
                 const schemaResult = await processSchema(databases, schema, parsedRows, log);
 
-                log(`Schema import complete: ${schemaResult.entities} entities, ${schemaResult.claims} claims, ${schemaResult.qualifiers} qualifiers, ${schemaResult.references} references, ${schemaResult.matched} matched, ${schemaResult.errors.length} errors`);
+                log(`Schema import complete (handler): ${schemaResult.totals.entities} entities, ${schemaResult.totals.claims} claims, ${schemaResult.totals.qualifiers} qualifiers, ${schemaResult.totals.references} references, ${schemaResult.totals.matched} matched, ${schemaResult.totals.errors.length} errors`);
 
                 return res.json({
                     success: true,
                     mode: "schema",
                     total: parsedRows.length,
-                    entities: schemaResult.entities,
-                    claims: schemaResult.claims,
-                    qualifiers: schemaResult.qualifiers,
-                    references: schemaResult.references,
-                    matched: schemaResult.matched,
-                    errors: schemaResult.errors.slice(0, 50),
-                    hasMoreErrors: schemaResult.errors.length > 50,
+                    totals: schemaResult.totals,
+                    createdItems: schemaResult.createdItems,
                 }, 200);
             }
 
