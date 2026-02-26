@@ -293,9 +293,27 @@ async function matchEntity(databases, matchRule, log) {
 async function processSchemaForRow(databases, schema, row, rowIndex, log) {
     const entityMap = {};  // "entity-0" → real $id
     const claimMap = {};   // "claim-0" → real $id
-    const results = { entities: 0, claims: 0, qualifiers: 0, references: 0, matched: 0, errors: [] };
+    const results = { entities: 0, claims: 0, qualifiers: 0, references: 0, matched: 0, errors: [], skipped: false };
+    const createdItems = { entities: [], claims: [], qualifiers: [], references: [] };
 
     if (log) log(`── Row ${rowIndex} ──────────────────────────`);
+
+    // --- Phase 0: Skip Conditions ---
+    if (schema.skipConditions && Array.isArray(schema.skipConditions)) {
+        for (const cond of schema.skipConditions) {
+            if (!cond.trim()) continue;
+            try {
+                const shouldSkip = evalFormula(cond, "", row, rowIndex);
+                if (shouldSkip) {
+                    if (log) log(`  [Skip] Row omitted due to condition: ${cond}`);
+                    results.skipped = true;
+                    return { entityMap, claimMap, results, createdItems };
+                }
+            } catch (e) {
+                if (log) log(`  [Skip Error] Evaluating condition "${cond}": ${e.message}`);
+            }
+        }
+    }
 
     // --- Phase 1: Entities ---
     if (schema.entities) {
@@ -337,6 +355,7 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
                     );
                     entityMap[symbolId] = doc.$id;
                     results.entities++;
+                    createdItems.entities.push({ _symbolId: symbolId, id: doc.$id, label: doc.label, description: doc.description });
                     if (log) log(`  [Entity] ${symbolId} → CREATED ${doc.$id}`);
                 }
             } catch (e) {
@@ -379,6 +398,7 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
                 );
                 claimMap[symbolId] = doc.$id;
                 results.claims++;
+                createdItems.claims.push({ _symbolId: symbolId, id: doc.$id, subject, property, datatype, value_raw, value_relation });
                 if (log) log(`  [Claim] ${symbolId} → CREATED ${doc.$id}`);
             } catch (e) {
                 if (log) log(`  [Claim] ${symbolId} → ERROR: ${e.message}`);
@@ -412,11 +432,12 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
                     continue;
                 }
 
-                await databases.createDocument(
+                const qualDoc = await databases.createDocument(
                     DATABASE_ID, "qualifiers", sdk.ID.unique(),
                     { claim, property, datatype, value_raw, value_relation }
                 );
                 results.qualifiers++;
+                createdItems.qualifiers.push({ _symbolId: symbolId, id: qualDoc.$id, claim, property, datatype, value_raw, value_relation });
                 if (log) log(`  [Qualifier] ${symbolId} → CREATED`);
             } catch (e) {
                 if (log) log(`  [Qualifier] ${symbolId} → ERROR: ${e.message}`);
@@ -446,11 +467,12 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
                     continue;
                 }
 
-                await databases.createDocument(
+                const refDoc = await databases.createDocument(
                     DATABASE_ID, "references", sdk.ID.unique(),
                     { claim, reference, details }
                 );
                 results.references++;
+                createdItems.references.push({ _symbolId: symbolId, id: refDoc.$id, claim, reference, details });
                 if (log) log(`  [Reference] ${symbolId} → CREATED`);
             } catch (e) {
                 if (log) log(`  [Reference] ${symbolId} → ERROR: ${e.message}`);
@@ -459,9 +481,12 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
         }
     }
 
-    if (log) log(`  [Summary] Row ${rowIndex}: ${results.entities} entities, ${results.claims} claims, ${results.qualifiers} qualifiers, ${results.references} refs, ${results.matched} matched, ${results.errors.length} errors`);
+    if (log) {
+        if (results.skipped) log(`  [Summary] Row ${rowIndex}: SKIPPED`);
+        else log(`  [Summary] Row ${rowIndex}: ${results.entities} entities, ${results.claims} claims, ${results.qualifiers} qualifiers, ${results.references} refs, ${results.matched} matched, ${results.errors.length} errors`);
+    }
 
-    return { entityMap, claimMap, results };
+    return { entityMap, claimMap, results, createdItems };
 }
 
 /**
@@ -472,7 +497,8 @@ async function processSchemaForRow(databases, schema, row, rowIndex, log) {
  * @param {Function} log
  */
 async function processSchema(databases, schema, rows, log) {
-    const totals = { entities: 0, claims: 0, qualifiers: 0, references: 0, matched: 0, errors: [] };
+    const totals = { entities: 0, claims: 0, qualifiers: 0, references: 0, matched: 0, errors: [], skipped: 0 };
+    const allCreated = { entities: [], claims: [], qualifiers: [], references: [] };
 
     // Log schema summary
     const entityCount = Object.keys(schema.entities || {}).length;
@@ -488,13 +514,24 @@ async function processSchema(databases, schema, rows, log) {
     const startTime = Date.now();
 
     for (let i = 0; i < rows.length; i++) {
-        const { results } = await processSchemaForRow(databases, schema, rows[i], i, log);
+        const { results, createdItems } = await processSchemaForRow(databases, schema, rows[i], i, log);
+
+        if (results.skipped) {
+            totals.skipped++;
+            continue;
+        }
+
         totals.entities += results.entities;
         totals.claims += results.claims;
         totals.qualifiers += results.qualifiers;
         totals.references += results.references;
         totals.matched += results.matched;
         totals.errors.push(...results.errors);
+
+        allCreated.entities.push(...createdItems.entities);
+        allCreated.claims.push(...createdItems.claims);
+        allCreated.qualifiers.push(...createdItems.qualifiers);
+        allCreated.references.push(...createdItems.references);
 
         if ((i + 1) % 10 === 0 || i === rows.length - 1) {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -503,9 +540,9 @@ async function processSchema(databases, schema, rows, log) {
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    log(`✅ Schema import complete in ${totalTime}s — ${totals.entities} entities, ${totals.claims} claims, ${totals.qualifiers} qualifiers, ${totals.references} references, ${totals.matched} matched, ${totals.errors.length} errors`);
+    log(`✅ Schema import complete in ${totalTime}s — ${totals.entities} entities, ${totals.claims} claims, ${totals.qualifiers} qualifiers, ${totals.references} references, ${totals.matched} matched, ${totals.skipped} skipped, ${totals.errors.length} errors`);
 
-    return totals;
+    return { success: true, totals, createdItems: allCreated };
 }
 
 // ============================================
