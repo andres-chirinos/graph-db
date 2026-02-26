@@ -285,8 +285,11 @@ export default function ImportPage() {
     const [dragover, setDragover] = useState(false);
     const [fileFormat, setFileFormat] = useState(""); // "csv", "tsv", "json"
     const [rawFileText, setRawFileText] = useState(""); // raw JSON text for re-parsing
+    const [activeFile, setActiveFile] = useState(null); // store file for re-parsing
 
     // Config
+    const [fileEncoding, setFileEncoding] = useState("utf-8");
+    const [csvSeparator, setCsvSeparator] = useState(",");
     const [targetCollection, setTargetCollection] = useState("entities");
     const [insertMode, setInsertMode] = useState("single");
 
@@ -319,6 +322,7 @@ export default function ImportPage() {
         claims: {},
         qualifiers: {},
         references: {},
+        skipConditions: [],
     });
     const [schemaCounters, setSchemaCounters] = useState({ entity: 0, claim: 0, qual: 0, ref: 0 });
     const [schemaJsonText, setSchemaJsonText] = useState("{}");
@@ -327,8 +331,16 @@ export default function ImportPage() {
 
     // Sync JSON text when schema changes from UI
     useEffect(() => {
-        setSchemaJsonText(JSON.stringify(schema, null, 2));
-    }, [schema]);
+        const fullSchema = {
+            settings: {
+                encoding: fileEncoding,
+                separator: csvSeparator,
+                dataPath: dataPath
+            },
+            ...schema
+        };
+        setSchemaJsonText(JSON.stringify(fullSchema, null, 2));
+    }, [schema, fileEncoding, csvSeparator, dataPath]);
 
     // Helper: render an expression input with an entity picker button
     const EntityPickerField = ({ fieldKey, value, onChange, placeholder, label: fieldLabel }) => {
@@ -365,7 +377,11 @@ export default function ImportPage() {
     };
 
     // === File Handling ===
-    const handleFile = useCallback((file) => {
+    const handleFile = useCallback((file, overrideEncoding, overrideSeparator) => {
+        const encoding = overrideEncoding || fileEncoding;
+        const separator = overrideSeparator || csvSeparator;
+
+        setActiveFile(file);
         setFileName(`📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
         setResult(null);
         setDetectedPaths([]);
@@ -378,10 +394,10 @@ export default function ImportPage() {
         if (ext === "csv" || ext === "tsv") {
             const reader = new FileReader();
             reader.onload = (e) => {
-                const { headers, rows } = parseCsvText(e.target.result, ext === "tsv" ? "\t" : ",");
+                const { headers, rows } = parseCsvText(e.target.result, ext === "tsv" ? "\t" : separator);
                 applyParsedData(headers, rows);
             };
-            reader.readAsText(file);
+            reader.readAsText(file, encoding);
         } else if (ext === "json") {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -406,11 +422,11 @@ export default function ImportPage() {
                     alert("Error parseando JSON: " + err.message);
                 }
             };
-            reader.readAsText(file);
+            reader.readAsText(file, encoding);
         } else {
             alert("Formato no soportado. Usa CSV, TSV o JSON.");
         }
-    }, [targetCollection]);
+    }, [targetCollection, fileEncoding, csvSeparator]);
 
     function applyParsedData(headers, rows) {
         setFileHeaders(headers);
@@ -673,6 +689,41 @@ export default function ImportPage() {
         triggerDownload(JSON.stringify(docs, null, 2), `${targetCollection}_imported.json`, "application/json");
     }
 
+    function downloadSchemaCsv(type) {
+        if (!result?.createdItems || !result.createdItems[type] || result.createdItems[type].length === 0) return;
+        const items = result.createdItems[type];
+        const keys = Object.keys(items[0]).filter(k => !k.startsWith("_")); // Exclude internal keys like _symbolId
+        const header = keys.map(csvEscape).join(",");
+        const rows = items.map(item =>
+            keys.map(k => {
+                const val = item[k];
+                return csvEscape(Array.isArray(val) ? val.join("|") : val);
+            }).join(",")
+        );
+        triggerDownload([header, ...rows].join("\n"), `imported_${type}.csv`, "text/csv");
+    }
+
+    function csvEscape(value) {
+        if (value === null || value === undefined) return "";
+        const str = String(value);
+        if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+            return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+    }
+
+    function triggerDownload(content, filename, contentType) {
+        const blob = new Blob([content], { type: contentType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
     // === Render ===
     if (authLoading) {
         return (
@@ -739,6 +790,41 @@ export default function ImportPage() {
                             style={{ display: "none" }}
                             onChange={(e) => e.target.files.length > 0 && handleFile(e.target.files[0])}
                         />
+
+                        {/* File Read Configurations */}
+                        {showConfig && (fileFormat === "csv" || fileFormat === "tsv") && (
+                            <div className="import-section">
+                                <h3>⚙️ Configuración de Lectura</h3>
+                                <div className="config-row">
+                                    <div className="config-group">
+                                        <label>Codificación</label>
+                                        <select className="form-select" value={fileEncoding} onChange={e => setFileEncoding(e.target.value)}>
+                                            <option value="utf-8">UTF-8</option>
+                                            <option value="latin1">ISO-8859-1 (Latin-1)</option>
+                                            <option value="windows-1252">Windows-1252</option>
+                                        </select>
+                                    </div>
+                                    {fileFormat === "csv" && (
+                                        <div className="config-group">
+                                            <label>Separador</label>
+                                            <select className="form-select" value={csvSeparator} onChange={e => setCsvSeparator(e.target.value)}>
+                                                <option value=",">Coma (,)</option>
+                                                <option value=";">Punto y coma (;)</option>
+                                                <option value="\t">Tabulador (\t)</option>
+                                                <option value="|">Barra vertical (|)</option>
+                                            </select>
+                                        </div>
+                                    )}
+                                    <div className="config-group" style={{ display: "flex", alignItems: "flex-end" }}>
+                                        <button className="btn btn-secondary" onClick={() => {
+                                            if (activeFile) handleFile(activeFile);
+                                        }}>
+                                            🔄 Recargar archivo
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* JSON Data Path Selector */}
                         {showConfig && fileFormat === "json" && detectedPaths.length > 0 && (
@@ -991,6 +1077,33 @@ export default function ImportPage() {
                                     Usa expresiones con <code>row.columna</code> y funciones como <code>TRIM()</code>, <code>CONCAT()</code>.
                                 </p>
 
+                                {/* --- Skip Conditions --- */}
+                                <div className="schema-section">
+                                    <h4>⏭️ Condiciones para omitir fila</h4>
+                                    <p style={{ color: "#72777d", fontSize: "0.8125rem", marginBottom: "0.75rem" }}>
+                                        Si alguna expresión evalúa a verdadero (true), la fila entera será omitida (e.g. <code>row.nombre === ''</code>).
+                                    </p>
+                                    {schema.skipConditions && schema.skipConditions.map((cond, i) => (
+                                        <div key={i} className="schema-field-row" style={{ display: "flex", gap: "0.5rem" }}>
+                                            <input type="text" className="transform-input transform-expression"
+                                                value={cond} onChange={e => {
+                                                    const newSkips = [...schema.skipConditions];
+                                                    newSkips[i] = e.target.value;
+                                                    setSchema(prev => ({ ...prev, skipConditions: newSkips }));
+                                                }}
+                                                placeholder="row.nombre === ''" style={{ flex: 1 }} />
+                                            <button className="transform-remove" onClick={() => {
+                                                const newSkips = schema.skipConditions.filter((_, idx) => idx !== i);
+                                                setSchema(prev => ({ ...prev, skipConditions: newSkips }));
+                                            }}>×</button>
+                                        </div>
+                                    ))}
+                                    <button className="btn btn-secondary btn-sm"
+                                        onClick={() => setSchema(prev => ({ ...prev, skipConditions: [...(prev.skipConditions || []), ""] }))}>
+                                        + Agregar condición
+                                    </button>
+                                </div>
+
                                 {/* --- Entities --- */}
                                 <div className="schema-section">
                                     <h4>🏷️ Entidades</h4>
@@ -1237,13 +1350,22 @@ export default function ImportPage() {
                                                     reader.onload = (ev) => {
                                                         try {
                                                             const loaded = JSON.parse(ev.target.result);
-                                                            setSchema(prev => ({
-                                                                entities: loaded.entities || prev.entities,
-                                                                match: loaded.match || prev.match,
-                                                                claims: loaded.claims || prev.claims,
-                                                                qualifiers: loaded.qualifiers || prev.qualifiers,
-                                                                references: loaded.references || prev.references,
-                                                            }));
+                                                            if (loaded.settings) {
+                                                                setFileEncoding(loaded.settings.encoding || "utf-8");
+                                                                setCsvSeparator(loaded.settings.separator || ",");
+                                                                setDataPath(loaded.settings.dataPath || "");
+                                                                if (activeFile) {
+                                                                    handleFile(activeFile, loaded.settings.encoding, loaded.settings.separator);
+                                                                }
+                                                            }
+                                                            setSchema({
+                                                                skipConditions: loaded.skipConditions || [],
+                                                                entities: loaded.entities || {},
+                                                                match: loaded.match || {},
+                                                                claims: loaded.claims || {},
+                                                                qualifiers: loaded.qualifiers || {},
+                                                                references: loaded.references || {},
+                                                            });
                                                             // Update counters based on loaded keys
                                                             const countMax = (obj, prefix) => {
                                                                 let max = 0;
@@ -1394,39 +1516,90 @@ export default function ImportPage() {
                                     <div className="result-box success">
                                         <h3 className="result-title-success">✅ Importación completada</h3>
 
-                                        {result.mode === "schema" ? (
+                                        {result.mode === "schema" || result.totals ? (
                                             /* Schema mode results */
-                                            <div className="result-stats">
-                                                <div className="stat">
-                                                    <div className="stat-value">{result.total}</div>
-                                                    <div className="stat-label">Filas</div>
-                                                </div>
-                                                <div className="stat">
-                                                    <div className="stat-value stat-value-success">{result.entities || 0}</div>
-                                                    <div className="stat-label">Entidades</div>
-                                                </div>
-                                                <div className="stat">
-                                                    <div className="stat-value" style={{ color: "#3366cc" }}>{result.matched || 0}</div>
-                                                    <div className="stat-label">Matches</div>
-                                                </div>
-                                                <div className="stat">
-                                                    <div className="stat-value stat-value-success">{result.claims || 0}</div>
-                                                    <div className="stat-label">Claims</div>
-                                                </div>
-                                                <div className="stat">
-                                                    <div className="stat-value stat-value-success">{result.qualifiers || 0}</div>
-                                                    <div className="stat-label">Qualifiers</div>
-                                                </div>
-                                                <div className="stat">
-                                                    <div className="stat-value stat-value-success">{result.references || 0}</div>
-                                                    <div className="stat-label">Referencias</div>
-                                                </div>
-                                                <div className="stat">
-                                                    <div className={`stat-value ${result.errors?.length ? "stat-value-error" : "stat-value-dim"}`}>
-                                                        {result.errors?.length || 0}
+                                            <div>
+                                                <div className="result-stats">
+                                                    <div className="stat">
+                                                        <div className="stat-value">{allRows.length}</div>
+                                                        <div className="stat-label">Filas</div>
                                                     </div>
-                                                    <div className="stat-label">Errores</div>
+                                                    <div className="stat">
+                                                        <div className="stat-value stat-value-success">{result.totals?.entities || 0}</div>
+                                                        <div className="stat-label">Entidades</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className="stat-value" style={{ color: "#3366cc" }}>{result.totals?.matched || 0}</div>
+                                                        <div className="stat-label">Matches</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className="stat-value stat-value-success">{result.totals?.claims || 0}</div>
+                                                        <div className="stat-label">Claims</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className="stat-value stat-value-success">{result.totals?.qualifiers || 0}</div>
+                                                        <div className="stat-label">Qualifiers</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className="stat-value stat-value-success">{result.totals?.references || 0}</div>
+                                                        <div className="stat-label">Referencias</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className="stat-value" style={{ color: "#e67e22" }}>{result.totals?.skipped || 0}</div>
+                                                        <div className="stat-label">Omitidas</div>
+                                                    </div>
+                                                    <div className="stat">
+                                                        <div className={`stat-value ${result.totals?.errors?.length ? "stat-value-error" : "stat-value-dim"}`}>
+                                                            {result.totals?.errors?.length || 0}
+                                                        </div>
+                                                        <div className="stat-label">Errores</div>
+                                                    </div>
                                                 </div>
+
+                                                {/* Schema Mode Downloads */}
+                                                {result.createdItems && (
+                                                    <div className="download-actions" style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                                                        {result.createdItems.entities?.length > 0 && (
+                                                            <button className="btn btn-secondary btn-sm" onClick={() => downloadSchemaCsv("entities")}>
+                                                                📥 Entidades ({result.createdItems.entities.length})
+                                                            </button>
+                                                        )}
+                                                        {result.createdItems.claims?.length > 0 && (
+                                                            <button className="btn btn-secondary btn-sm" onClick={() => downloadSchemaCsv("claims")}>
+                                                                📥 Claims ({result.createdItems.claims.length})
+                                                            </button>
+                                                        )}
+                                                        {result.createdItems.qualifiers?.length > 0 && (
+                                                            <button className="btn btn-secondary btn-sm" onClick={() => downloadSchemaCsv("qualifiers")}>
+                                                                📥 Qualifiers ({result.createdItems.qualifiers.length})
+                                                            </button>
+                                                        )}
+                                                        {result.createdItems.references?.length > 0 && (
+                                                            <button className="btn btn-secondary btn-sm" onClick={() => downloadSchemaCsv("references")}>
+                                                                📥 Referencias ({result.createdItems.references.length})
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {/* Render Schema Errors */}
+                                                {result.totals?.errors?.length > 0 && (
+                                                    <div style={{ marginTop: "1rem" }}>
+                                                        <h4>Errores (Esquema):</h4>
+                                                        <div className="errors-list">
+                                                            {result.totals.errors.slice(0, 50).map((e, i) => (
+                                                                <div key={i} className="error-item">
+                                                                    Fila {e.row}: {e.phase} {e.symbolId} - {e.error}
+                                                                </div>
+                                                            ))}
+                                                            {result.totals.errors.length > 50 && (
+                                                                <div className="error-item" style={{ fontStyle: "italic", opacity: 0.8 }}>
+                                                                    ... y {result.totals.errors.length - 50} errores más.
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         ) : (
                                             /* Flat mode results */
