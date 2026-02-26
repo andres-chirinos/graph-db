@@ -114,6 +114,113 @@ function resolveDataPath(obj, path) {
 }
 
 // ============================================
+// FORMULA ENGINE — Expression-based (Excel-like)
+// ============================================
+
+/**
+ * Pre-loaded helper functions available inside every formula expression.
+ * Usage: TRIM(row.name), UPPER(value), CONCAT(row.a, " ", row.b), etc.
+ */
+const FORMULA_HELPERS = {
+    // String functions
+    TRIM: (v) => String(v ?? "").trim(),
+    UPPER: (v) => String(v ?? "").toUpperCase(),
+    LOWER: (v) => String(v ?? "").toLowerCase(),
+    CAPITALIZE: (v) => String(v ?? "").replace(/\b\w/g, c => c.toUpperCase()),
+    REPLACE: (v, search, rep) => String(v ?? "").replaceAll(search, rep ?? ""),
+    PREFIX: (v, pre) => String(pre ?? "") + String(v ?? ""),
+    SUFFIX: (v, suf) => String(v ?? "") + String(suf ?? ""),
+    PAD: (v, len, ch) => String(v ?? "").padStart(Number(len) || 2, ch || "0"),
+    CONCAT: (...args) => args.map(a => String(a ?? "")).join(""),
+    LEN: (v) => String(v ?? "").length,
+    LEFT: (v, n) => String(v ?? "").substring(0, Number(n) || 1),
+    RIGHT: (v, n) => { const s = String(v ?? ""); return s.substring(s.length - (Number(n) || 1)); },
+    SUBSTR: (v, start, len) => { const s = String(v ?? ""); return s.substring(Number(start) || 0, len != null ? (Number(start) || 0) + Number(len) : s.length); },
+    SPLIT: (v, sep, idx) => { const parts = String(v ?? "").split(sep ?? ","); return parts[Number(idx) || 0] ?? ""; },
+    REGEX: (v, pattern) => { try { const m = String(v ?? "").match(new RegExp(pattern)); return m ? (m[1] || m[0]) : ""; } catch { return ""; } },
+    CLEAN: (v) => String(v ?? "").replace(/[^\w\s]/g, "").trim(),
+
+    // Number functions
+    NUM: (v) => { const n = Number(String(v ?? "").replace(/[^\d.\-]/g, "")); return isNaN(n) ? 0 : n; },
+    ROUND: (v, d) => { const n = Number(v); return isNaN(n) ? v : Number(n.toFixed(Number(d) || 0)); },
+    ABS: (v) => Math.abs(Number(v) || 0),
+    FLOOR: (v) => Math.floor(Number(v) || 0),
+    CEIL: (v) => Math.ceil(Number(v) || 0),
+    MIN: (...args) => Math.min(...args.map(Number)),
+    MAX: (...args) => Math.max(...args.map(Number)),
+
+    // Logic
+    IF: (cond, then_val, else_val) => cond ? then_val : (else_val ?? ""),
+
+    // Date helpers
+    TODAY: () => new Date().toISOString().split("T")[0],
+    YEAR: (v) => { try { return new Date(v).getFullYear(); } catch { return ""; } },
+};
+
+// Build the function parameter names and values from helpers
+const _helperNames = Object.keys(FORMULA_HELPERS);
+const _helperValues = Object.values(FORMULA_HELPERS);
+
+/**
+ * Evaluate a formula expression string in a sandboxed context.
+ * Available variables: value, row, index, + all FORMULA_HELPERS
+ */
+function evalFormula(expression, value, row, index) {
+    try {
+        const fn = new Function(
+            "value", "row", "index", ..._helperNames,
+            `return (${expression})`
+        );
+        return fn(value, row, index, ..._helperValues);
+    } catch (e) {
+        return `#ERR: ${e.message}`;
+    }
+}
+
+/**
+ * Apply an array of formula rules to all rows.
+ * Each formula: { target, expression, isNew }
+ *   - isNew=true: creates column `target`, value is the expression result (value="")
+ *   - isNew=false: modifies column `target`, value = row[target]
+ *   - target="__all__": applies expression to every column
+ */
+function applyFormulas(rows, formulas, log) {
+    if (!formulas || !formulas.length) return rows;
+
+    let result = rows.map(r => ({ ...r }));
+
+    for (const formula of formulas) {
+        const { target, expression, isNew = false } = formula;
+        if (!expression) continue;
+
+        if (isNew) {
+            result = result.map((row, idx) => ({
+                ...row,
+                [target]: evalFormula(expression, "", row, idx),
+            }));
+            if (log) log(`Formula [new "${target}"]: ${expression}`);
+        } else if (target === "__all__") {
+            result = result.map((row, idx) => {
+                const updated = { ...row };
+                for (const col of Object.keys(updated)) {
+                    updated[col] = evalFormula(expression, updated[col], updated, idx);
+                }
+                return updated;
+            });
+            if (log) log(`Formula [all columns]: ${expression}`);
+        } else {
+            result = result.map((row, idx) => ({
+                ...row,
+                [target]: evalFormula(expression, row[target], row, idx),
+            }));
+            if (log) log(`Formula ["${target}"]: ${expression}`);
+        }
+    }
+
+    return result;
+}
+
+// ============================================
 // ROW MAPPING
 // ============================================
 
@@ -305,6 +412,7 @@ module.exports = async ({ req, res, log, error }) => {
                 delimiter = ",",
                 dataPath = "",
                 skipRows = 0,
+                formulas = [],
                 fields = [],
                 csvData,
                 jsonData,
@@ -375,6 +483,13 @@ module.exports = async ({ req, res, log, error }) => {
             }
 
             log(`Importing ${parsedRows.length} rows into "${targetCollection}"`);
+
+            // Apply formulas (before field mapping)
+            if (formulas.length > 0) {
+                log(`Applying ${formulas.length} formula(s)...`);
+                parsedRows = applyFormulas(parsedRows, formulas, log);
+                log(`Formulas applied. Row count: ${parsedRows.length}`);
+            }
 
             // Initialize Appwrite client
             const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;

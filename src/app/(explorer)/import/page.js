@@ -175,6 +175,78 @@ function autoTransform(target) {
 }
 
 // ============================================
+// Formula Helpers (mirrors server-side FORMULA_HELPERS)
+// ============================================
+
+const FORMULA_HELPERS = {
+    TRIM: (v) => String(v ?? "").trim(),
+    UPPER: (v) => String(v ?? "").toUpperCase(),
+    LOWER: (v) => String(v ?? "").toLowerCase(),
+    CAPITALIZE: (v) => String(v ?? "").replace(/\b\w/g, c => c.toUpperCase()),
+    REPLACE: (v, search, rep) => String(v ?? "").replaceAll(search, rep ?? ""),
+    PREFIX: (v, pre) => String(pre ?? "") + String(v ?? ""),
+    SUFFIX: (v, suf) => String(v ?? "") + String(suf ?? ""),
+    PAD: (v, len, ch) => String(v ?? "").padStart(Number(len) || 2, ch || "0"),
+    CONCAT: (...args) => args.map(a => String(a ?? "")).join(""),
+    LEN: (v) => String(v ?? "").length,
+    LEFT: (v, n) => String(v ?? "").substring(0, Number(n) || 1),
+    RIGHT: (v, n) => { const s = String(v ?? ""); return s.substring(s.length - (Number(n) || 1)); },
+    SUBSTR: (v, start, len) => { const s = String(v ?? ""); return s.substring(Number(start) || 0, len != null ? (Number(start) || 0) + Number(len) : s.length); },
+    SPLIT: (v, sep, idx) => { const parts = String(v ?? "").split(sep ?? ","); return parts[Number(idx) || 0] ?? ""; },
+    REGEX: (v, pattern) => { try { const m = String(v ?? "").match(new RegExp(pattern)); return m ? (m[1] || m[0]) : ""; } catch { return ""; } },
+    CLEAN: (v) => String(v ?? "").replace(/[^\w\s]/g, "").trim(),
+    NUM: (v) => { const n = Number(String(v ?? "").replace(/[^\d.\-]/g, "")); return isNaN(n) ? 0 : n; },
+    ROUND: (v, d) => { const n = Number(v); return isNaN(n) ? v : Number(n.toFixed(Number(d) || 0)); },
+    ABS: (v) => Math.abs(Number(v) || 0),
+    FLOOR: (v) => Math.floor(Number(v) || 0),
+    CEIL: (v) => Math.ceil(Number(v) || 0),
+    MIN: (...args) => Math.min(...args.map(Number)),
+    MAX: (...args) => Math.max(...args.map(Number)),
+    IF: (cond, then_val, else_val) => cond ? then_val : (else_val ?? ""),
+    TODAY: () => new Date().toISOString().split("T")[0],
+    YEAR: (v) => { try { return new Date(v).getFullYear(); } catch { return ""; } },
+};
+
+const _helperNames = Object.keys(FORMULA_HELPERS);
+const _helperValues = Object.values(FORMULA_HELPERS);
+
+/** Evaluate a formula expression client-side (mirrors server evalFormula) */
+function evalFormulaLocal(expression, value, row, index) {
+    try {
+        const fn = new Function("value", "row", "index", ..._helperNames, `return (${expression})`);
+        return fn(value, row, index, ..._helperValues);
+    } catch (e) {
+        return `#ERR: ${e.message}`;
+    }
+}
+
+/** Apply formulas client-side for preview (real processing on server) */
+function applyFormulasLocal(rows, headers, formulas) {
+    if (!formulas.length) return { rows, headers };
+    let newHeaders = [...headers];
+    let newRows = rows.map(r => ({ ...r }));
+    for (const f of formulas) {
+        if (!f.expression) continue;
+        if (f.isNew) {
+            if (!newHeaders.includes(f.target)) newHeaders.push(f.target);
+            newRows = newRows.map((row, idx) => ({ ...row, [f.target]: evalFormulaLocal(f.expression, "", row, idx) }));
+        } else if (f.target === "__all__") {
+            newRows = newRows.map((row, idx) => {
+                const u = { ...row };
+                for (const col of newHeaders) u[col] = evalFormulaLocal(f.expression, u[col], u, idx);
+                return u;
+            });
+        } else {
+            newRows = newRows.map((row, idx) => ({ ...row, [f.target]: evalFormulaLocal(f.expression, row[f.target], row, idx) }));
+        }
+    }
+    return { rows: newRows, headers: newHeaders };
+}
+
+/** Available function names for autocomplete hints */
+const FORMULA_FUNCTION_LIST = _helperNames.join(", ");
+
+// ============================================
 // Download helpers
 // ============================================
 
@@ -231,6 +303,10 @@ export default function ImportPage() {
     const [result, setResult] = useState(null);
 
     const showConfig = fileHeaders.length > 0;
+
+    // Formulas (unified: transforms + computed columns)
+    const [formulas, setFormulas] = useState([]);
+    const [formulaPreview, setFormulaPreview] = useState(null);
 
     // === File Handling ===
     const handleFile = useCallback((file) => {
@@ -326,13 +402,69 @@ export default function ImportPage() {
 
     function handleCollectionChange(value) {
         setTargetCollection(value);
-        // Re-map fields
         const targetFields = COLLECTION_FIELDS[value] || [];
         setMappings(prev => prev.map(m => ({
             ...m,
             target: autoMapField(m.source, targetFields),
             transform: autoTransform(autoMapField(m.source, targetFields)),
         })));
+    }
+
+    // === Formulas ===
+    function addFormula(isNew = false) {
+        setFormulas(prev => [
+            ...prev,
+            {
+                target: isNew ? "" : (fileHeaders[0] || ""),
+                expression: "",
+                isNew,
+                id: Date.now(),
+            },
+        ]);
+    }
+
+    function updateFormula(idx, updates) {
+        setFormulas(prev => {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], ...updates };
+            return updated;
+        });
+    }
+
+    function removeFormula(idx) {
+        setFormulas(prev => prev.filter((_, i) => i !== idx));
+        setFormulaPreview(null);
+    }
+
+    function previewFormulas() {
+        const { rows: transformed, headers: newHeaders } = applyFormulasLocal(allRows, fileHeaders, formulas);
+        setFormulaPreview({
+            headers: newHeaders,
+            rows: transformed,
+            preview: transformed.slice(0, 10),
+        });
+        // Add new columns to mappings
+        const targetFields = COLLECTION_FIELDS[targetCollection] || [];
+        const currentSources = mappings.map(m => m.source);
+        const newCols = newHeaders.filter(h => !currentSources.includes(h));
+        if (newCols.length > 0) {
+            setMappings(prev => [
+                ...prev,
+                ...newCols.map(h => ({
+                    source: h,
+                    target: autoMapField(h, targetFields),
+                    transform: autoTransform(autoMapField(h, targetFields)),
+                })),
+            ]);
+            setFileHeaders(newHeaders);
+        }
+    }
+
+    function getFormulaSample(f) {
+        if (!previewRows.length || !f.expression) return "";
+        const row = previewRows[0];
+        const val = f.isNew ? "" : (f.target === "__all__" ? row[fileHeaders[0]] : row[f.target]);
+        return String(evalFormulaLocal(f.expression, val, row, 0));
     }
 
     // === Import ===
@@ -349,9 +481,19 @@ export default function ImportPage() {
         setResult(null);
 
         try {
+            // Build formulas array for server
+            const serverFormulas = formulas
+                .filter(f => f.expression)
+                .map(f => ({
+                    target: f.target,
+                    expression: f.expression,
+                    isNew: f.isNew || false,
+                }));
+
             const payload = {
                 targetCollection,
                 rows: allRows,
+                formulas: serverFormulas,
                 fields: fields.map(f => ({ source: f.source, target: f.target, transform: f.transform })),
                 useBatch: insertMode === "batch",
                 batchSize: 50,
@@ -554,6 +696,133 @@ export default function ImportPage() {
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* Formulas */}
+                        {showConfig && (
+                            <div className="import-section">
+                                <h3>🔧 Fórmulas</h3>
+                                <p style={{ color: "#72777d", fontSize: "0.8125rem", marginBottom: "0.5rem" }}>
+                                    Escribe expresiones como en Excel. Variables: <code>value</code> (valor actual), <code>row</code> (fila), <code>index</code> (nro. fila).
+                                </p>
+                                <p style={{ color: "#a2a9b1", fontSize: "0.75rem", marginBottom: "0.75rem", lineHeight: "1.5" }}>
+                                    <strong>Texto:</strong> TRIM, UPPER, LOWER, CAPITALIZE, REPLACE, CONCAT, LEFT, RIGHT, SUBSTR, SPLIT, PAD, CLEAN, LEN
+                                    &nbsp;·&nbsp;<strong>Números:</strong> NUM, ROUND, ABS, FLOOR, CEIL, MIN, MAX
+                                    &nbsp;·&nbsp;<strong>Lógica:</strong> IF &nbsp;·&nbsp;<strong>Fecha:</strong> TODAY, YEAR
+                                    &nbsp;·&nbsp;También funciones nativas de JS: <code>value.includes()</code>, <code>parseInt()</code>, etc.
+                                </p>
+
+                                {formulas.map((f, i) => (
+                                    <div key={f.id} className="transform-row">
+                                        {/* Badge: click to toggle type */}
+                                        <div
+                                            className={`transform-badge ${f.isNew ? "computed" : "column"}`}
+                                            onClick={() => updateFormula(i, {
+                                                isNew: !f.isNew,
+                                                target: !f.isNew ? "" : (fileHeaders[0] || ""),
+                                                expression: f.expression,
+                                            })}
+                                            style={{ cursor: "pointer" }}
+                                            title="Clic para cambiar tipo"
+                                        >
+                                            {f.isNew ? "➕ Nueva" : "fx"}
+                                        </div>
+
+                                        {/* Target: column selector or text input */}
+                                        {f.isNew ? (
+                                            <input
+                                                type="text"
+                                                className="transform-input"
+                                                value={f.target}
+                                                onChange={(e) => updateFormula(i, { target: e.target.value })}
+                                                placeholder="nombre_columna"
+                                                style={{ width: 130 }}
+                                            />
+                                        ) : (
+                                            <select
+                                                className="transform-select"
+                                                value={f.target}
+                                                onChange={(e) => updateFormula(i, { target: e.target.value })}
+                                            >
+                                                <option value="__all__">✱ Todas</option>
+                                                {fileHeaders.map(h => (
+                                                    <option key={h} value={h}>{h}</option>
+                                                ))}
+                                            </select>
+                                        )}
+
+                                        <span className="mapping-arrow">=</span>
+
+                                        {/* Expression input */}
+                                        <input
+                                            type="text"
+                                            className="transform-input transform-expression"
+                                            value={f.expression}
+                                            onChange={(e) => updateFormula(i, { expression: e.target.value })}
+                                            placeholder={f.isNew
+                                                ? "CONCAT(row.nombre, \" \", row.apellido)"
+                                                : "TRIM(value)"
+                                            }
+                                        />
+
+                                        {/* Live sample */}
+                                        {f.expression && (
+                                            <div className="transform-sample" title={getFormulaSample(f)}>
+                                                → {getFormulaSample(f) || "..."}
+                                            </div>
+                                        )}
+
+                                        <button
+                                            className="transform-remove"
+                                            onClick={() => removeFormula(i)}
+                                            title="Eliminar"
+                                        >×</button>
+                                    </div>
+                                ))}
+
+                                <div className="transform-actions">
+                                    <button className="btn btn-secondary btn-sm" onClick={() => addFormula(false)}>
+                                        + Modificar columna
+                                    </button>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => addFormula(true)}>
+                                        + Nueva columna
+                                    </button>
+                                    {formulas.length > 0 && (
+                                        <button className="btn btn-primary btn-sm" onClick={previewFormulas}>
+                                            ▶ Previsualizar
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Formula Preview */}
+                                {formulaPreview && (
+                                    <div style={{ marginTop: "1rem" }}>
+                                        <h4 style={{ marginBottom: "0.5rem", color: "#36c" }}>
+                                            ✅ Vista previa transformada ({formulaPreview.rows.length} filas)
+                                        </h4>
+                                        <div className="preview-table-wrapper">
+                                            <table className="preview-table">
+                                                <thead>
+                                                    <tr>
+                                                        {formulaPreview.headers.map(h => <th key={h}>{h}</th>)}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {formulaPreview.preview.map((row, i) => (
+                                                        <tr key={i}>
+                                                            {formulaPreview.headers.map(h => (
+                                                                <td key={h} title={String(row[h] ?? "")}>
+                                                                    {String(row[h] ?? "")}
+                                                                </td>
+                                                            ))}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 

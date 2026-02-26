@@ -419,6 +419,127 @@
     display: block;
 }
 
+/* Transforms */
+.transform-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.625rem;
+    border-bottom: 1px solid #eaecf0;
+    border-radius: 6px;
+    transition: background 0.2s;
+    flex-wrap: wrap;
+}
+
+.transform-row:hover {
+    background: rgba(51, 102, 204, 0.03);
+}
+
+.transform-badge {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.transform-badge.column {
+    background: #e8f0fe;
+    color: #3366cc;
+}
+
+.transform-badge.computed {
+    background: #e6f4ea;
+    color: #14866d;
+}
+
+.transform-select {
+    padding: 0.375rem 0.5rem;
+    border: 1px solid #c8ccd1;
+    border-radius: 6px;
+    font-size: 0.8125rem;
+    color: #202122;
+    background: #fff;
+    outline: none;
+    max-width: 200px;
+}
+
+.transform-select:focus {
+    border-color: #3366cc;
+}
+
+.transform-input {
+    padding: 0.375rem 0.5rem;
+    border: 1px solid #c8ccd1;
+    border-radius: 6px;
+    font-size: 0.8125rem;
+    color: #202122;
+    background: #fff;
+    outline: none;
+    font-family: inherit;
+}
+
+.transform-input:focus {
+    border-color: #3366cc;
+}
+
+.transform-expression {
+    flex: 1;
+    min-width: 200px;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.75rem;
+}
+
+.transform-sample {
+    font-family: 'Fira Code', monospace;
+    font-size: 0.75rem;
+    color: #72777d;
+    background: #f8f9fa;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.transform-remove {
+    background: none;
+    border: 1px solid #eaecf0;
+    color: #a2a9b1;
+    font-size: 1.125rem;
+    cursor: pointer;
+    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    font-family: inherit;
+}
+
+.transform-remove:hover {
+    color: #d33;
+    border-color: #d33;
+    background: rgba(211, 51, 51, 0.05);
+}
+
+.transform-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.btn-sm {
+    padding: 0.375rem 0.75rem !important;
+    font-size: 0.8125rem !important;
+}
+
 @media (max-width: 768px) {
     .config-row {
         flex-direction: column;
@@ -431,5 +552,16 @@
 
     .mapping-row {
         flex-wrap: wrap;
+    }
+
+    .transform-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .transform-select,
+    .transform-input {
+        max-width: 100%;
+        width: 100%;
     }
 }
