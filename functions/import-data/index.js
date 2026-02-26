@@ -61,13 +61,27 @@ function parseCsvString(csvString, config = {}) {
     return { headers, rows };
 }
 
-function parseJsonString(jsonString) {
+function parseJsonString(jsonString, dataPath) {
     const parsed = JSON.parse(jsonString);
-    const data = Array.isArray(parsed) ? parsed
-        : Array.isArray(parsed?.data) ? parsed.data
-            : Array.isArray(parsed?.items) ? parsed.items
-                : Array.isArray(parsed?.rows) ? parsed.rows
-                    : [];
+
+    // If a dataPath is provided, use it to find the array
+    let data;
+    if (dataPath) {
+        data = resolveDataPath(parsed, dataPath);
+        if (!Array.isArray(data)) {
+            throw new Error(`dataPath "${dataPath}" did not resolve to an array. Got: ${typeof data}`);
+        }
+    } else {
+        // Auto-detect: try common keys
+        data = Array.isArray(parsed) ? parsed
+            : Array.isArray(parsed?.data) ? parsed.data
+                : Array.isArray(parsed?.items) ? parsed.items
+                    : Array.isArray(parsed?.rows) ? parsed.rows
+                        : Array.isArray(parsed?.results) ? parsed.results
+                            : Array.isArray(parsed?.records) ? parsed.records
+                                : [];
+    }
+
     if (!data.length) return { headers: [], rows: [] };
 
     if (Array.isArray(data[0])) {
@@ -82,6 +96,21 @@ function parseJsonString(jsonString) {
 
     const headers = Object.keys(data[0]);
     return { headers, rows: data };
+}
+
+/**
+ * Resolve a dot-notation path on an object.
+ * Supports: "data.results", "response.items", "sheets[0].rows", "a.b.c"
+ */
+function resolveDataPath(obj, path) {
+    if (!path || !obj) return obj;
+    const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.');
+    let current = obj;
+    for (const seg of segments) {
+        if (current === null || current === undefined) return undefined;
+        current = current[seg];
+    }
+    return current;
 }
 
 // ============================================
@@ -274,6 +303,8 @@ module.exports = async ({ req, res, log, error }) => {
                 format = "csv",
                 hasHeader = true,
                 delimiter = ",",
+                dataPath = "",
+                skipRows = 0,
                 fields = [],
                 csvData,
                 jsonData,
@@ -322,12 +353,13 @@ module.exports = async ({ req, res, log, error }) => {
                 parsedHeaders = preRows.length > 0 ? Object.keys(preRows[0]) : [];
             } else if (csvData) {
                 const result = parseCsvString(csvData, { hasHeader, delimiter });
-                parsedRows = result.rows;
+                // Apply skipRows: skip N data rows after header
+                parsedRows = skipRows > 0 ? result.rows.slice(skipRows) : result.rows;
                 parsedHeaders = result.headers;
             } else if (jsonData) {
                 const dataStr = typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData);
-                const result = parseJsonString(dataStr);
-                parsedRows = result.rows;
+                const result = parseJsonString(dataStr, dataPath || undefined);
+                parsedRows = skipRows > 0 ? result.rows.slice(skipRows) : result.rows;
                 parsedHeaders = result.headers;
             } else {
                 return res.json({
@@ -348,6 +380,7 @@ module.exports = async ({ req, res, log, error }) => {
             const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
             const projectId = process.env.APPWRITE_PROJECT_ID || process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID;
             const apiKey = req.headers['x-appwrite-key'] || process.env.APPWRITE_API_KEY;
+            const userJwt = req?.headers?.["x-appwrite-user-jwt"];
 
             if (!endpoint || !projectId) {
                 return res.json({ error: 'Missing APPWRITE_ENDPOINT or APPWRITE_PROJECT_ID' }, 500);
@@ -357,7 +390,9 @@ module.exports = async ({ req, res, log, error }) => {
                 .setEndpoint(endpoint)
                 .setProject(projectId);
 
-            if (apiKey) {
+            if (userJwt) {
+                client.setJWT(userJwt);
+            } else if (apiKey) {
                 client.setKey(apiKey);
             } else {
                 log("Warning: No API Key. Operations may fail due to permissions.");

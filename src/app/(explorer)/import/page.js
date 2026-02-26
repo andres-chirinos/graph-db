@@ -65,10 +65,24 @@ function parseCsvText(text, separator = ",") {
     return { headers, rows };
 }
 
-function parseJsonText(text) {
-    let data = JSON.parse(text);
-    if (!Array.isArray(data)) {
-        data = data.data || data.items || data.rows || [];
+function parseJsonText(text, dataPath) {
+    const parsed = JSON.parse(text);
+
+    let data;
+    if (dataPath) {
+        data = resolveDataPath(parsed, dataPath);
+        if (!Array.isArray(data)) {
+            throw new Error(`La ruta "${dataPath}" no contiene un array.`);
+        }
+    } else {
+        // Auto-detect common keys
+        data = Array.isArray(parsed) ? parsed
+            : Array.isArray(parsed?.data) ? parsed.data
+                : Array.isArray(parsed?.items) ? parsed.items
+                    : Array.isArray(parsed?.rows) ? parsed.rows
+                        : Array.isArray(parsed?.results) ? parsed.results
+                            : Array.isArray(parsed?.records) ? parsed.records
+                                : [];
     }
     if (!data.length) return { headers: [], rows: [] };
 
@@ -84,6 +98,66 @@ function parseJsonText(text) {
 
     const headers = Object.keys(data[0]);
     return { headers, rows: data };
+}
+
+/**
+ * Resolve a dot-notation path on an object.
+ * Supports: "data.results", "response.items", "sheets[0].rows", "a.b.c"
+ */
+function resolveDataPath(obj, path) {
+    if (!path || !obj) return obj;
+    const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.');
+    let current = obj;
+    for (const seg of segments) {
+        if (current === null || current === undefined) return undefined;
+        current = current[seg];
+    }
+    return current;
+}
+
+/**
+ * Recursively detect all paths in a JSON structure that lead to arrays of objects.
+ * Returns array of { path, length, sample } objects.
+ */
+function detectJsonPaths(obj, prefix = "", maxDepth = 5) {
+    const results = [];
+    if (maxDepth <= 0 || !obj || typeof obj !== "object") return results;
+
+    if (Array.isArray(obj)) {
+        if (obj.length > 0 && typeof obj[0] === "object" && !Array.isArray(obj[0])) {
+            const keys = Object.keys(obj[0]).slice(0, 5).join(", ");
+            results.push({
+                path: prefix || "(raíz)",
+                length: obj.length,
+                sample: keys,
+                isRoot: !prefix,
+            });
+        }
+        // Also check nested arrays in first element
+        if (obj.length > 0 && typeof obj[0] === "object") {
+            for (const [key, val] of Object.entries(obj[0])) {
+                if (Array.isArray(val) || (typeof val === "object" && val !== null)) {
+                    const childPath = prefix ? `${prefix}[0].${key}` : `[0].${key}`;
+                    results.push(...detectJsonPaths(val, childPath, maxDepth - 1));
+                }
+            }
+        }
+        return results;
+    }
+
+    // It's a plain object — check each key
+    for (const [key, val] of Object.entries(obj)) {
+        if (val === null || val === undefined) continue;
+        const childPath = prefix ? `${prefix}.${key}` : key;
+
+        if (Array.isArray(val)) {
+            results.push(...detectJsonPaths(val, childPath, maxDepth - 1));
+        } else if (typeof val === "object") {
+            results.push(...detectJsonPaths(val, childPath, maxDepth - 1));
+        }
+    }
+
+    return results;
 }
 
 function autoMapField(header, targetFields) {
@@ -136,10 +210,16 @@ export default function ImportPage() {
     const [previewRows, setPreviewRows] = useState([]);
     const [fileName, setFileName] = useState("");
     const [dragover, setDragover] = useState(false);
+    const [fileFormat, setFileFormat] = useState(""); // "csv", "tsv", "json"
+    const [rawFileText, setRawFileText] = useState(""); // raw JSON text for re-parsing
 
     // Config
     const [targetCollection, setTargetCollection] = useState("entities");
     const [insertMode, setInsertMode] = useState("single");
+
+    // Data path (JSON)
+    const [dataPath, setDataPath] = useState("");
+    const [detectedPaths, setDetectedPaths] = useState([]);
 
     // Mapping
     const [mappings, setMappings] = useState([]);
@@ -156,8 +236,12 @@ export default function ImportPage() {
     const handleFile = useCallback((file) => {
         setFileName(`📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
         setResult(null);
+        setDetectedPaths([]);
+        setDataPath("");
+        setRawFileText("");
 
         const ext = file.name.split(".").pop().toLowerCase();
+        setFileFormat(ext === "tsv" ? "tsv" : ext);
 
         if (ext === "csv" || ext === "tsv") {
             const reader = new FileReader();
@@ -170,7 +254,21 @@ export default function ImportPage() {
             const reader = new FileReader();
             reader.onload = (e) => {
                 try {
-                    const { headers, rows } = parseJsonText(e.target.result);
+                    const text = e.target.result;
+                    setRawFileText(text);
+
+                    // Detect all array paths in the JSON
+                    const parsed = JSON.parse(text);
+                    const paths = detectJsonPaths(parsed);
+                    setDetectedPaths(paths);
+
+                    // Auto-select: if root is array, use it; otherwise pick first detected path
+                    const rootPath = paths.find(p => p.isRoot);
+                    const bestPath = rootPath ? "" : (paths.length > 0 ? paths[0].path : "");
+                    setDataPath(bestPath);
+
+                    // Parse with the detected path
+                    const { headers, rows } = parseJsonText(text, bestPath || undefined);
                     applyParsedData(headers, rows);
                 } catch (err) {
                     alert("Error parseando JSON: " + err.message);
@@ -195,6 +293,19 @@ export default function ImportPage() {
             transform: autoTransform(autoMapField(h, targetFields)),
         }));
         setMappings(newMappings);
+    }
+
+    /** Re-parse JSON with a new data path */
+    function handleDataPathChange(newPath) {
+        setDataPath(newPath);
+        if (!rawFileText) return;
+        try {
+            const pathArg = newPath === "(raíz)" ? undefined : (newPath || undefined);
+            const { headers, rows } = parseJsonText(rawFileText, pathArg);
+            applyParsedData(headers, rows);
+        } catch (err) {
+            alert(`Error con la ruta "${newPath}": ${err.message}`);
+        }
     }
 
     function updateMappingTarget(idx, value) {
@@ -353,6 +464,41 @@ export default function ImportPage() {
                             style={{ display: "none" }}
                             onChange={(e) => e.target.files.length > 0 && handleFile(e.target.files[0])}
                         />
+
+                        {/* JSON Data Path Selector */}
+                        {showConfig && fileFormat === "json" && detectedPaths.length > 0 && (
+                            <div className="import-section">
+                                <h3>📍 Ruta de datos</h3>
+                                <p style={{ color: "#72777d", fontSize: "0.8125rem", marginBottom: "0.75rem" }}>
+                                    Se detectaron {detectedPaths.length} ubicación(es) de datos en el JSON.
+                                    Selecciona cuál contiene los registros a importar.
+                                </p>
+                                <div className="config-row">
+                                    <div className="config-field" style={{ flex: 1 }}>
+                                        <label>Ruta detectada</label>
+                                        <select
+                                            value={dataPath}
+                                            onChange={(e) => handleDataPathChange(e.target.value)}
+                                        >
+                                            {detectedPaths.map((p, i) => (
+                                                <option key={i} value={p.path}>
+                                                    {p.path} — {p.length} elementos ({p.sample})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="config-field" style={{ flex: 1 }}>
+                                        <label>Ruta personalizada (dot notation)</label>
+                                        <input
+                                            type="text"
+                                            value={dataPath === "(raíz)" ? "" : dataPath}
+                                            onChange={(e) => handleDataPathChange(e.target.value)}
+                                            placeholder="ej: data.results, response.items"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Config */}
                         {showConfig && (
