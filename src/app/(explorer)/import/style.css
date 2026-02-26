@@ -712,6 +712,44 @@
     border-color: #3366cc;
 }
 
+.schema-field-row {
+    position: relative;
+}
+
+.schema-picker-btn {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: 1px solid #c8ccd1;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0.25rem 0.5rem;
+    transition: background 0.2s, border-color 0.2s;
+    line-height: 1;
+}
+
+.schema-picker-btn:hover {
+    background: #eaf3ff;
+    border-color: #3366cc;
+}
+
+.schema-picker-popup {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 350px;
+    z-index: 100;
+    background: #fff;
+    border: 1px solid #c8ccd1;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    padding: 0.75rem;
+    margin-top: 0.25rem;
+}
+
 @media (max-width: 768px) {
     .config-row {
         flex-direction: column;

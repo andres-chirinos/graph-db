@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { executeFunction, FUNCTIONS } from "@/lib/functions";
 import { LoadingState } from "@/components";
+import EntitySelector from "@/components/EntitySelector";
 import "./style.css";
 
 const FUNCTION_ID = FUNCTIONS.IMPORT;
@@ -322,11 +323,46 @@ export default function ImportPage() {
     const [schemaCounters, setSchemaCounters] = useState({ entity: 0, claim: 0, qual: 0, ref: 0 });
     const [schemaJsonText, setSchemaJsonText] = useState("{}");
     const schemaFileRef = useRef(null);
+    const [entityPickerOpen, setEntityPickerOpen] = useState(null); // "claims.claim-0.property"
 
     // Sync JSON text when schema changes from UI
     useEffect(() => {
         setSchemaJsonText(JSON.stringify(schema, null, 2));
     }, [schema]);
+
+    // Helper: render an expression input with an entity picker button
+    const EntityPickerField = ({ fieldKey, value, onChange, placeholder, label: fieldLabel }) => {
+        const isOpen = entityPickerOpen === fieldKey;
+        return (
+            <div className="schema-field-row">
+                <label>{fieldLabel}</label>
+                <input type="text" className="transform-input transform-expression"
+                    value={value || ""}
+                    onChange={e => onChange(e.target.value)}
+                    placeholder={placeholder} />
+                <button
+                    type="button"
+                    className="schema-picker-btn"
+                    title="Buscar entidad"
+                    onClick={() => setEntityPickerOpen(isOpen ? null : fieldKey)}
+                >
+                    🔍
+                </button>
+                {isOpen && (
+                    <div className="schema-picker-popup">
+                        <EntitySelector
+                            value={null}
+                            placeholder="Buscar entidad..."
+                            onChange={(id) => {
+                                if (id) onChange(`'${id}'`);
+                                setEntityPickerOpen(null);
+                            }}
+                        />
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     // === File Handling ===
     const handleFile = useCallback((file) => {
@@ -998,12 +1034,13 @@ export default function ImportPage() {
                                                     </div>
                                                     {(schema.match[key].by === "property" || schema.match[key].by === "label+property") && (
                                                         <>
-                                                            <div className="schema-field-row">
-                                                                <label>property ID</label>
-                                                                <input type="text" className="transform-input transform-expression"
-                                                                    value={schema.match[key].property || ""} onChange={e => updateMatchRule(key, { property: e.target.value })}
-                                                                    placeholder="'P_CI'" />
-                                                            </div>
+                                                            <EntityPickerField
+                                                                fieldKey={`match.${key}.property`}
+                                                                label="property ID"
+                                                                value={schema.match[key].property || ""}
+                                                                onChange={v => updateMatchRule(key, { property: v })}
+                                                                placeholder="'P_CI'"
+                                                            />
                                                             <div className="schema-field-row">
                                                                 <label>value</label>
                                                                 <input type="text" className="transform-input transform-expression"
@@ -1044,12 +1081,13 @@ export default function ImportPage() {
                                                     {entitySymbolIds.map(id => <option key={id} value={id}>{id}</option>)}
                                                 </select>
                                             </div>
-                                            <div className="schema-field-row">
-                                                <label>property</label>
-                                                <input type="text" className="transform-input transform-expression"
-                                                    value={cl.property || ""} onChange={e => updateSchemaItem("claims", key, { property: e.target.value })}
-                                                    placeholder="'P_CI'" />
-                                            </div>
+                                            <EntityPickerField
+                                                fieldKey={`claims.${key}.property`}
+                                                label="property"
+                                                value={cl.property || ""}
+                                                onChange={v => updateSchemaItem("claims", key, { property: v })}
+                                                placeholder="'P_CI'"
+                                            />
                                             <div className="schema-field-row">
                                                 <label>datatype</label>
                                                 <select className="transform-select" value={cl.datatype || "'string'"}
@@ -1063,12 +1101,13 @@ export default function ImportPage() {
                                                 </select>
                                             </div>
                                             {cl.datatype === "'relation'" ? (
-                                                <div className="schema-field-row">
-                                                    <label>value_relation</label>
-                                                    <input type="text" className="transform-input transform-expression"
-                                                        value={cl.value_relation || ""} onChange={e => updateSchemaItem("claims", key, { value_relation: e.target.value })}
-                                                        placeholder="entity-0 o row.ref_entity_id" />
-                                                </div>
+                                                <EntityPickerField
+                                                    fieldKey={`claims.${key}.value_relation`}
+                                                    label="value_relation"
+                                                    value={cl.value_relation || ""}
+                                                    onChange={v => updateSchemaItem("claims", key, { value_relation: v })}
+                                                    placeholder="entity-0 o ID de entidad"
+                                                />
                                             ) : (
                                                 <div className="schema-field-row">
                                                     <label>value_raw</label>
@@ -1102,12 +1141,13 @@ export default function ImportPage() {
                                                     {claimSymbolIds.map(id => <option key={id} value={id}>{id}</option>)}
                                                 </select>
                                             </div>
-                                            <div className="schema-field-row">
-                                                <label>property</label>
-                                                <input type="text" className="transform-input transform-expression"
-                                                    value={qual.property || ""} onChange={e => updateSchemaItem("qualifiers", key, { property: e.target.value })}
-                                                    placeholder="'P_FECHA'" />
-                                            </div>
+                                            <EntityPickerField
+                                                fieldKey={`qualifiers.${key}.property`}
+                                                label="property"
+                                                value={qual.property || ""}
+                                                onChange={v => updateSchemaItem("qualifiers", key, { property: v })}
+                                                placeholder="'P_FECHA'"
+                                            />
                                             <div className="schema-field-row">
                                                 <label>datatype</label>
                                                 <select className="transform-select" value={qual.datatype || "'string'"}
@@ -1120,12 +1160,13 @@ export default function ImportPage() {
                                                 </select>
                                             </div>
                                             {qual.datatype === "'relation'" ? (
-                                                <div className="schema-field-row">
-                                                    <label>value_relation</label>
-                                                    <input type="text" className="transform-input transform-expression"
-                                                        value={qual.value_relation || ""} onChange={e => updateSchemaItem("qualifiers", key, { value_relation: e.target.value })}
-                                                        placeholder="entity-0 o row.ref_id" />
-                                                </div>
+                                                <EntityPickerField
+                                                    fieldKey={`qualifiers.${key}.value_relation`}
+                                                    label="value_relation"
+                                                    value={qual.value_relation || ""}
+                                                    onChange={v => updateSchemaItem("qualifiers", key, { value_relation: v })}
+                                                    placeholder="entity-0 o ID de entidad"
+                                                />
                                             ) : (
                                                 <div className="schema-field-row">
                                                     <label>value_raw</label>
@@ -1159,12 +1200,13 @@ export default function ImportPage() {
                                                     {claimSymbolIds.map(id => <option key={id} value={id}>{id}</option>)}
                                                 </select>
                                             </div>
-                                            <div className="schema-field-row">
-                                                <label>reference</label>
-                                                <input type="text" className="transform-input transform-expression"
-                                                    value={ref.reference || ""} onChange={e => updateSchemaItem("references", key, { reference: e.target.value })}
-                                                    placeholder="entity-0 o row.ref_entity_id" />
-                                            </div>
+                                            <EntityPickerField
+                                                fieldKey={`references.${key}.reference`}
+                                                label="reference"
+                                                value={ref.reference || ""}
+                                                onChange={v => updateSchemaItem("references", key, { reference: v })}
+                                                placeholder="entity-0 o ID de entidad"
+                                            />
                                             <div className="schema-field-row">
                                                 <label>details</label>
                                                 <input type="text" className="transform-input transform-expression"
