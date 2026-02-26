@@ -135,8 +135,6 @@ export default function EntitySelector({
     // Use searchEntities directly as it handles sorting by relevance and pagination
     const result = await searchEntities(trimmed, pageSize, offset);
 
-    console.debug(result);
-
     return {
       rows: result?.rows || [],
       total: result?.total || 0
