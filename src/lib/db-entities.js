@@ -2,6 +2,7 @@ import { tablesDB, Query } from "./appwrite";
 import { DATABASE_ID, TABLES, generatePermissions, stripSystemFields, normalizeText, stringifyClaimValue } from "./db-core";
 import { runWithTransaction, createAuditEntry, wrapTransactionResult, updateRowPermissions } from "./db-audit";
 import { _searchClaimsBySchemaCondition, getClaim, getClaimsBySubject } from "./db-claims";
+import { FUNCTIONS, executeFunction } from "./functions";
 
 // ============================================
 // ENTITIES
@@ -353,139 +354,23 @@ export async function searchEntitiesAdvanced(conditions, limit = 10) {
   return entities;
 }
 
-/**
- * Searches for entities based on a complex schema definition, which can include text search,
- * direct property-value matches, and nested conditions for claims, qualifiers, and references.
- *
- * @param {EntitySchema} schema - The schema definition to search for.
- * @param {number} limit - The maximum number of entities to return.
- * @param {number} offset - The number of entities to skip (for pagination).
- * @returns {Promise<Array<Object>>} - A list of entities that match the schema.
- */
-async function _findEntityIds(schema, limit) {
-  const { text, properties = [], claims = [], groups = [], logic = "AND" } = schema;
+export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
+  try {
+    const response = await executeFunction(
+      FUNCTIONS.QUERY,
+      { schema, limit, offset },
+      "POST"
+    );
 
-  let candidateEntityIds = new Set();
-  let firstConditionProcessed = false;
-
-  // 1. Process text search condition
-  if (text) {
-    const textMatches = await searchEntities(text, limit * 5, 0);
-    const ids = textMatches.rows.map(entity => entity.$id);
-    candidateEntityIds = new Set(ids);
-    firstConditionProcessed = true;
-  }
-
-  // Helper to merge results based on logic
-  const mergeIds = (currentSet, newSet, isFirstInLoop) => {
-    if (logic === "AND") {
-      if (firstConditionProcessed || !isFirstInLoop) {
-        return new Set([...currentSet].filter(id => newSet.has(id)));
-      } else {
-        return newSet;
-      }
-    } else { // OR
-      return new Set([...currentSet, ...newSet]);
-    }
-  };
-
-  // 2. Process direct properties conditions
-  if (properties.length > 0) {
-    let propertyMatchedIds = new Set(firstConditionProcessed ? candidateEntityIds : []);
-    let firstProp = true;
-
-    for (const propCondition of properties) {
-      if (!propCondition.propertyId || !propCondition.value) continue;
-      const propMatches = await searchEntitiesByPropertyValue(
-        propCondition.propertyId,
-        propCondition.value,
-        limit * 5,
-        propCondition.matchMode
-      );
-      const currentPropIds = new Set(propMatches.map(entity => entity.$id));
-
-      propertyMatchedIds = mergeIds(propertyMatchedIds, currentPropIds, firstProp);
-      firstProp = false;
+    if (response.error) {
+      throw new Error(response.error);
     }
 
-    if (!firstProp) { // If we processed at least one valid property
-      candidateEntityIds = propertyMatchedIds;
-      firstConditionProcessed = true;
-    }
-  }
-
-  // 3. Process complex claims conditions
-  if (claims.length > 0) {
-    let claimMatchedIds = new Set(firstConditionProcessed ? candidateEntityIds : []);
-    let firstClaim = true;
-
-    for (const claimCondition of claims) {
-      const currentClaimSubjectIds = await _searchClaimsBySchemaCondition(claimCondition, limit * 5, 0);
-      claimMatchedIds = mergeIds(claimMatchedIds, currentClaimSubjectIds, firstClaim);
-      firstClaim = false;
-    }
-
-    if (!firstClaim) {
-      candidateEntityIds = claimMatchedIds;
-      firstConditionProcessed = true;
-    }
-  }
-
-  // 4. Process nested groups (recursive)
-  if (groups.length > 0) {
-    let groupMatchedIds = new Set(firstConditionProcessed ? candidateEntityIds : []);
-    let firstGroup = true;
-
-    for (const groupSchema of groups) {
-      const matchedIds = await _findEntityIds(groupSchema, limit);
-      const currentGroupIds = new Set(matchedIds);
-      groupMatchedIds = mergeIds(groupMatchedIds, currentGroupIds, firstGroup);
-      firstGroup = false;
-    }
-
-    if (!firstGroup) {
-      candidateEntityIds = groupMatchedIds;
-      firstConditionProcessed = true;
-    }
-  }
-
-  if (!firstConditionProcessed) {
+    return response.results || [];
+  } catch (error) {
+    console.error("Error executing schema search via query function:", error);
     return [];
   }
-
-  return Array.from(candidateEntityIds);
-}
-
-/**
- * Searches for entities based on a complex schema definition.
- * 
- * @param {EntitySchema} schema - The schema definition to search for.
- * @param {number} limit - The maximum number of entities to return.
- * @param {number} offset - The number of entities to skip.
- * @returns {Promise<Array<Object>>} - A list of entities.
- */
-export async function searchEntitiesBySchema(schema, limit = 20, offset = 0) {
-  // Use the internal helper to find IDs efficiently including groups
-  const allIds = await _findEntityIds(schema, limit + offset + 50);
-
-  // Pagination slice
-  const pagedIds = allIds.slice(offset, offset + limit);
-
-  const entities = [];
-  for (const id of pagedIds) {
-    try {
-      const entity = await tablesDB.getRow({
-        databaseId: DATABASE_ID,
-        tableId: TABLES.ENTITIES,
-        rowId: id,
-      });
-      if (entity) entities.push(entity);
-    } catch (e) {
-      console.warn(`Entidad ${id} no encontrada`);
-    }
-  }
-
-  return entities;
 }
 
 /**

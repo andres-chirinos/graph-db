@@ -2,6 +2,7 @@ import { functions } from "./appwrite";
 
 export const FUNCTIONS = {
     IMPORT: process.env.NEXT_PUBLIC_IMPORT_FUNCTION_ID || "import-data",
+    QUERY: process.env.NEXT_PUBLIC_QUERY_FUNCTION_ID || "query",
 };
 
 /**
