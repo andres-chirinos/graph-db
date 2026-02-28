@@ -79,6 +79,42 @@ function parseSearchQuery(query) {
     return result;
 }
 
+/**
+ * Searches for entities based on a structured schema.
+ * @param {sdk.Databases} databases Appwrite Databases service instance.
+ * @param {object} schema The search schema.
+ * @param {number} limit Maximum number of entities to return.
+ * @param {number} offset Offset for pagination.
+ * @param {function} log Optional logging function.
+ * @returns {Promise<Array<object>>} List of matching entities.
+ */
+async function searchEntitiesBySchema(databases, schema, limit = 20, offset = 0, log) {
+    const mainStart = Date.now();
+    if (log) log(`[SchemaSearch] Starting search with schema: ${JSON.stringify(schema)}`);
+
+    const entityIds = await _findEntityIds(databases, schema, limit + offset, log);
+
+    if (entityIds.length === 0) {
+        if (log) log(`[SchemaSearch] No entity IDs found. Search completed in ${Date.now() - mainStart}ms.`);
+        return [];
+    }
+
+    // Fetch full entity data for the found IDs
+    const queries = [
+        sdk.Query.limit(limit),
+        sdk.Query.offset(offset),
+        sdk.Query.orderDesc("$createdAt"), // Default ordering
+        sdk.Query.equal("$id", entityIds)
+    ];
+
+    if (log) log(`[SchemaSearch] Fetching full entity data for ${entityIds.length} IDs. Time elapsed: ${Date.now() - mainStart}ms.`);
+    const result = await databases.listDocuments(DATABASE_ID, TABLES.ENTITIES, queries);
+    const finalEntities = result.documents.map(doc => typeof doc.data === 'string' ? JSON.parse(doc.data) : (doc.data || doc));
+
+    if (log) log(`[SchemaSearch] Search completed successfully in ${Date.now() - mainStart}ms!`);
+    return finalEntities;
+}
+
 function calculateRelevance(entity, parsedQuery) {
     const normLabel = normalizeText(entity.label);
     const normDesc = normalizeText(entity.description);
@@ -228,6 +264,7 @@ async function searchEntitiesByPropertyValue(databases, propertyId, value, limit
 }
 
 async function getFullClaim(databases, claimId, log) {
+    const t0 = Date.now();
     try {
         const claimDoc = await databases.getDocument(DATABASE_ID, TABLES.CLAIMS, claimId);
         const claim = typeof claimDoc.data === 'string' ? JSON.parse(claimDoc.data) : (claimDoc.data || claimDoc);
@@ -247,6 +284,7 @@ async function getFullClaim(databases, claimId, log) {
         claim.qualifiersList = qualifiersResult.documents.map(d => typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || d));
         claim.referencesList = referencesResult.documents.map(d => typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || d));
 
+        if (log) log(`[getFullClaim] Finished in ${Date.now() - t0}ms for claimId ${claimId}`);
         return claim;
     } catch (err) {
         if (log) log(`[getFullClaim] Error: ${err.message}`);
@@ -303,6 +341,7 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
     let hasMoreClaims = true;
 
     while (hasMoreClaims && matchingSubjectIds.size < limit) {
+        const loopT0 = Date.now();
         const claimsResult = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, [
             sdk.Query.equal("property", claimSchema.propertyId),
             sdk.Query.limit(pageSize),
@@ -310,6 +349,7 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
         ]);
 
         const claims = claimsResult.documents || [];
+        if (log) log(`[_searchClaimsBySchemaCondition] Fetched ${claims.length} claims inside loop at offset ${currentOffset} in ${Date.now() - loopT0}ms`);
         if (claims.length === 0) break;
 
         for (const claimDoc of claims) {
@@ -345,7 +385,9 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
     return matchingSubjectIds;
 }
 
+// Helper to recursively find entities matching the schema condition
 async function _findEntityIds(databases, schema, limit, log) {
+    const t0 = Date.now();
     if (log) log(`[_findEntityIds] Started lookup with schema logic ${schema.logic}`);
     const { text, properties = [], claims = [], groups = [], logic = "AND" } = schema;
     let candidateEntityIds = new Set();
@@ -427,8 +469,12 @@ async function _findEntityIds(databases, schema, limit, log) {
         }
     }
 
-    if (!firstConditionProcessed) return [];
+    if (!firstConditionProcessed) {
+        if (log) log(`[_findEntityIds] Finished in ${Date.now() - t0}ms, no conditions processed.`);
+        return [];
+    }
 
+    if (log) log(`[_findEntityIds] Finished in ${Date.now() - t0}ms, found ${candidateEntityIds.size} candidates.`);
     return Array.from(candidateEntityIds);
 }
 
@@ -436,6 +482,9 @@ async function _findEntityIds(databases, schema, limit, log) {
 // Legacy SPARQL Execution Logic
 // ----------------------------------------------------- //
 async function executeSparql(parsed, databases, log) {
+    const startTime = Date.now();
+    if (log) log(`[SPARQL] Starting execution. Parsed patterns: ${parsed.wherePattern.length}`);
+
     if (parsed.type !== 'SELECT') throw new Error('Only SELECT queries are supported in this engine version.');
     if (parsed.wherePattern.length === 0) throw new Error('WHERE clause cannot be empty.');
 
@@ -497,6 +546,8 @@ async function executeSparql(parsed, databases, log) {
         // we let the manual filter catch it unless we are sure it's an indexed field.
     }
 
+    if (log) log(`[SPARQL] Fetching anchor claims for property ${anchorPropId}. Limit: ${fetchLimit}. Time elapsed: ${Date.now() - startTime}ms`);
+
     let claimsResponse;
     try {
         claimsResponse = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, queries);
@@ -504,11 +555,19 @@ async function executeSparql(parsed, databases, log) {
         throw new Error(`Failed to fetch anchor claims: ${e.message}`);
     }
 
+    if (log) log(`[SPARQL] Anchor claims returned ${claimsResponse.documents.length} documents. Time elapsed: ${Date.now() - startTime}ms`);
+
     let results = [];
     let yieldedCount = 0;
 
+    if (log) log(`[SPARQL] Starting loop over ${claimsResponse.documents.length} anchor documents...`);
+    let loopStartTime = Date.now();
+
     for (const anchorDoc of claimsResponse.documents) {
-        if (results.length >= queryLimit) break;
+        if (results.length >= queryLimit) {
+            if (log) log(`[SPARQL] Reached requested limit of ${queryLimit}. Breaking loop.`);
+            break;
+        }
 
         const data = typeof anchorDoc.data === 'string' ? JSON.parse(anchorDoc.data) : (anchorDoc.data || anchorDoc);
         const subjectId = data.subject || data.$id;
@@ -540,11 +599,13 @@ async function executeSparql(parsed, databases, log) {
             const propId = cp.predicate.replace('claim:', '');
 
             try {
+                const claimT1 = Date.now();
                 const otherClaims = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, [
                     sdk.Query.equal('subject', typeof subjectId === 'string' ? subjectId : subjectId.$id),
                     sdk.Query.equal('property', propId),
                     sdk.Query.limit(1)
                 ]);
+                // if (log) log(`[SPARQL] Fetched additional claim ${propId} in ${Date.now() - claimT1}ms`);
 
                 if (otherClaims.documents.length === 0) {
                     isValid = false; break;
@@ -659,6 +720,8 @@ async function executeSparql(parsed, databases, log) {
 
         results.push(resultRow);
     }
+
+    if (log) log(`[SPARQL] Loop finished in ${Date.now() - loopStartTime}ms. Total execution time: ${Date.now() - startTime}ms. Yielded items: ${results.length}. Skipped on offset: ${yieldedCount - results.length}`);
     return results;
 }
 
