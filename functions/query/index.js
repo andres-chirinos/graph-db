@@ -226,21 +226,29 @@ async function searchEntitiesByPropertyValue(databases, propertyId, value, limit
     return Array.from(entityIds).slice(0, limit).map(id => ({ $id: id }));
 }
 
-async function getFullClaim(databases, claimId) {
+async function getFullClaim(databases, claimId, log) {
     try {
         const claimDoc = await databases.getDocument(DATABASE_ID, TABLES.CLAIMS, claimId);
         const claim = typeof claimDoc.data === 'string' ? JSON.parse(claimDoc.data) : (claimDoc.data || claimDoc);
 
+        if (log) log(`[getFullClaim] Requesting qualifiers/references for claim: ${JSON.stringify(claimId)}`);
         const [qualifiersResult, referencesResult] = await Promise.all([
-            databases.listDocuments(DATABASE_ID, TABLES.QUALIFIERS, [sdk.Query.equal("claim", claimId), sdk.Query.limit(100)]),
-            databases.listDocuments(DATABASE_ID, TABLES.REFERENCES, [sdk.Query.equal("claim", claimId), sdk.Query.limit(100)])
+            databases.listDocuments(DATABASE_ID, TABLES.QUALIFIERS, [sdk.Query.equal("claim", claimId), sdk.Query.limit(100)]).catch(e => {
+                if (log) log(`QUALIFIER ERROR for claimId ${claimId}: ${e.message}`);
+                throw e;
+            }),
+            databases.listDocuments(DATABASE_ID, TABLES.REFERENCES, [sdk.Query.equal("claim", claimId), sdk.Query.limit(100)]).catch(e => {
+                if (log) log(`REFERENCE ERROR for claimId ${claimId}: ${e.message}`);
+                throw e;
+            })
         ]);
 
         claim.qualifiersList = qualifiersResult.documents.map(d => typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || d));
         claim.referencesList = referencesResult.documents.map(d => typeof d.data === 'string' ? JSON.parse(d.data) : (d.data || d));
 
         return claim;
-    } catch {
+    } catch (err) {
+        if (log) log(`[getFullClaim] Error: ${err.message}`);
         return null;
     }
 }
@@ -286,7 +294,8 @@ function _claimMatchesSchemaCondition(claim, claimSchema) {
     return true;
 }
 
-async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50, offset = 0) {
+async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50, offset = 0, log) {
+    if (log) log(`[_searchClaimsBySchemaCondition] Started for property: ${claimSchema.propertyId}`);
     const matchingSubjectIds = new Set();
     const pageSize = 100;
     let currentOffset = 0;
@@ -309,7 +318,7 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
             if ((Array.isArray(claimSchema.qualifiers) && claimSchema.qualifiers.length > 0) ||
                 (Array.isArray(claimSchema.references) && claimSchema.references.length > 0)) {
 
-                const fullClaim = await getFullClaim(databases, claimDoc.$id);
+                const fullClaim = await getFullClaim(databases, claimDoc.$id, log);
                 if (fullClaim && _claimMatchesSchemaCondition(fullClaim, claimSchema)) {
                     const subjectId = fullClaim.subject?.$id || fullClaim.subject;
                     if (subjectId) {
@@ -335,7 +344,8 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
     return matchingSubjectIds;
 }
 
-async function _findEntityIds(databases, schema, limit) {
+async function _findEntityIds(databases, schema, limit, log) {
+    if (log) log(`[_findEntityIds] Started lookup with schema logic ${schema.logic}`);
     const { text, properties = [], claims = [], groups = [], logic = "AND" } = schema;
     let candidateEntityIds = new Set();
     let firstConditionProcessed = false;
@@ -388,7 +398,7 @@ async function _findEntityIds(databases, schema, limit) {
         let firstClaim = true;
 
         for (const claimCondition of claims) {
-            const currentClaimSubjectIds = await _searchClaimsBySchemaCondition(databases, claimCondition, limit * 5, 0);
+            const currentClaimSubjectIds = await _searchClaimsBySchemaCondition(databases, claimCondition, limit * 5, 0, log);
             claimMatchedIds = mergeIds(claimMatchedIds, currentClaimSubjectIds, firstClaim);
             firstClaim = false;
         }
@@ -404,7 +414,7 @@ async function _findEntityIds(databases, schema, limit) {
         let firstGroup = true;
 
         for (const groupSchema of groups) {
-            const matchedIds = await _findEntityIds(databases, groupSchema, limit);
+            const matchedIds = await _findEntityIds(databases, groupSchema, limit, log);
             const currentGroupIds = new Set(matchedIds);
             groupMatchedIds = mergeIds(groupMatchedIds, currentGroupIds, firstGroup);
             firstGroup = false;
@@ -424,7 +434,7 @@ async function _findEntityIds(databases, schema, limit) {
 // ----------------------------------------------------- //
 // Legacy SPARQL Execution Logic
 // ----------------------------------------------------- //
-async function executeSparql(parsed, databases) {
+async function executeSparql(parsed, databases, log) {
     if (parsed.type !== 'SELECT') throw new Error('Only SELECT queries are supported in this engine version.');
     if (parsed.wherePattern.length === 0) throw new Error('WHERE clause cannot be empty.');
 
@@ -481,7 +491,10 @@ async function executeSparql(parsed, databases) {
                         const qdata = typeof qualResponse.documents[0].data === 'string' ? JSON.parse(qualResponse.documents[0].data) : (qualResponse.documents[0].data || qualResponse.documents[0]);
                         if (parsed.variables.includes(qualVar) || parsed.variables.includes('*')) resultRow[qualVar] = qdata.value;
                     } else { isValid = false; break; }
-                } catch { isValid = false; break; }
+                } catch (err) {
+                    if (log) log(`SPARQL QUALIFIER ERROR for claimId ${JSON.stringify(claimId)}: ${err.message}`);
+                    isValid = false; break;
+                }
             }
             else if (pattern.subject === statementVar && pattern.predicate.startsWith('ref:')) {
                 const refPropId = pattern.predicate.replace('ref:', '');
@@ -494,7 +507,10 @@ async function executeSparql(parsed, databases) {
                         const rdata = typeof refResponse.documents[0].data === 'string' ? JSON.parse(refResponse.documents[0].data) : (refResponse.documents[0].data || refResponse.documents[0]);
                         if (parsed.variables.includes(refVar) || parsed.variables.includes('*')) resultRow[refVar] = rdata.value;
                     } else { isValid = false; break; }
-                } catch { isValid = false; break; }
+                } catch (err) {
+                    if (log) log(`SPARQL REFERENCE ERROR for claimId ${JSON.stringify(claimId)}: ${err.message}`);
+                    isValid = false; break;
+                }
             }
         }
 
@@ -526,15 +542,15 @@ async function executeSparql(parsed, databases) {
 module.exports = async ({ req, res, log, error }) => {
     try {
         if (req.method === 'GET') {
-            const htmlContent = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-            const endpoint = process.env.APPWRITE_ENDPOINT || process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT;
-            const projectId = process.env.APPWRITE_PROJECT_ID || process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID;
+            log("GET Request received. Redirecting to Next.js Query page.");
 
-            const configHtml = htmlContent
-                .replace('{{APPWRITE_ENDPOINT}}', endpoint)
-                .replace('{{APPWRITE_PROJECT_ID}}', projectId);
+            const isProd = !req.headers.host?.includes('localhost');
+            // Provide a graceful fallback to frontend URL dynamically if NEXT_PUBLIC_BASE_URL is set
+            const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (isProd ? 'https://tu-dominio.com' : 'http://localhost:3000');
 
-            return res.text(configHtml, 200, { 'Content-Type': 'text/html' });
+            return res.send('', 302, {
+                'Location': `${baseUrl}/query`
+            });
         }
 
         if (req.method === 'POST') {
@@ -561,7 +577,7 @@ module.exports = async ({ req, res, log, error }) => {
                 const limit = body.limit || 50;
                 const offset = body.offset || 0;
 
-                const allIds = await _findEntityIds(databases, body.schema, limit + offset + 50);
+                const allIds = await _findEntityIds(databases, body.schema, limit + offset + 50, log);
                 const pagedIds = allIds.slice(offset, offset + limit);
 
                 const entities = [];
@@ -585,7 +601,7 @@ module.exports = async ({ req, res, log, error }) => {
                 const parsed = parser.parse();
                 log("Parsed Query: " + JSON.stringify(parsed));
 
-                const results = await executeSparql(parsed, databases);
+                const results = await executeSparql(parsed, databases, log);
                 return res.json({ results: { bindings: results } }, 200);
             }
 
