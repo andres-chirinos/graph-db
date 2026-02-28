@@ -459,7 +459,6 @@ async function executeSparql(parsed, databases, log) {
     }
 
     const queries = [sdk.Query.equal('property', propertyId), sdk.Query.limit(100)];
-    if (targetValue) queries.push(sdk.Query.equal('value', targetValue));
 
     const claimsResponse = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, queries);
     let results = [];
@@ -471,11 +470,17 @@ async function executeSparql(parsed, databases, log) {
         const data = typeof document.data === 'string' ? JSON.parse(document.data) : (document.data || document);
         const subjectId = data.subject || data.$id;
         const claimId = document.$id;
+        const claimValueRaw = data.value_raw || data.value; // some claims store value inside relation or raw
+
+        // Filter targetValue locally since 'value' isn't a searchable table attribute
+        if (targetValue && claimValueRaw !== targetValue && data.value_relation?.$id !== targetValue && data.value_relation !== targetValue) {
+            continue;
+        }
 
         if (statementVar && parsed.variables.includes(statementVar)) resultRow[statementVar] = claimId;
 
         const valueVarPattern = parsed.wherePattern.find(p => p.subject === statementVar && p.predicate === 'value:' && p.object.startsWith('?'));
-        if (valueVarPattern && parsed.variables.includes(valueVarPattern.object)) resultRow[valueVarPattern.object] = data.value;
+        if (valueVarPattern && parsed.variables.includes(valueVarPattern.object)) resultRow[valueVarPattern.object] = claimValueRaw;
 
         for (const pattern of parsed.wherePattern) {
             if (pattern === anchorPattern) continue;
