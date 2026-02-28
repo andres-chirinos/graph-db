@@ -127,7 +127,7 @@ async function searchEntitiesText(databases, searchTerm, limit = 20, offset = 0)
     const queries = [
         sdk.Query.limit(limit * 3),
         sdk.Query.offset(offset),
-        sdk.Query.select(["$id", "label", "description", "aliases"]) // Prevent fetching claims relation
+        sdk.Query.select(["$id", "label", "description", "aliases"])
     ];
 
     if (searchTerm && searchTerm.trim()) {
@@ -439,89 +439,167 @@ async function executeSparql(parsed, databases, log) {
     if (parsed.type !== 'SELECT') throw new Error('Only SELECT queries are supported in this engine version.');
     if (parsed.wherePattern.length === 0) throw new Error('WHERE clause cannot be empty.');
 
-    const anchorPattern = parsed.wherePattern.find(p => p.predicate.startsWith('prop:') || p.predicate.startsWith('claim:'));
-    if (!anchorPattern) throw new Error('A `prop:Pxx` or `claim:Pxx` predicate is required to anchor the query to entities.');
+    // 1. Group patterns by type
+    const claimPatterns = parsed.wherePattern.filter(p => p.predicate.startsWith('claim:') && p.object.startsWith('?'));
+    const valuePatterns = parsed.wherePattern.filter(p => p.predicate === 'value:');
+    const qualPatterns = parsed.wherePattern.filter(p => p.predicate.startsWith('qual:'));
+    const refPatterns = parsed.wherePattern.filter(p => p.predicate.startsWith('ref:'));
 
-    let propertyId;
-    let targetValue = null;
-    let statementVar = null;
+    if (claimPatterns.length === 0) throw new Error('At least one `claim:Pxx ?stmt` predicate is required. Prop:Pxx shorthand is no longer supported, use claim:Pxx.');
 
-    if (anchorPattern.predicate.startsWith('prop:')) {
-        propertyId = anchorPattern.predicate.replace('prop:', '');
-        targetValue = anchorPattern.object.replace('item:', '');
-    } else if (anchorPattern.predicate.startsWith('claim:')) {
-        propertyId = anchorPattern.predicate.replace('claim:', '');
-        statementVar = anchorPattern.object;
-        const valuePattern = parsed.wherePattern.find(p => p.subject === statementVar && p.predicate === 'value:');
-        if (valuePattern && !valuePattern.object.startsWith('?')) {
-            targetValue = valuePattern.object.replace('item:', '');
+    // Find the best anchor claim (one that has an exact value match)
+    let anchorClaimPattern = claimPatterns[0];
+    let anchorValuePattern = null;
+    let anchorTargetValue = null;
+
+    for (const cp of claimPatterns) {
+        const vp = valuePatterns.find(v => v.subject === cp.object);
+        if (vp && !vp.object.startsWith('?')) {
+            anchorClaimPattern = cp;
+            anchorValuePattern = vp;
+            anchorTargetValue = vp.object.replace('item:', '').replace(/['"]/g, '');
+            break;
         }
     }
 
-    const queries = [sdk.Query.equal('property', propertyId), sdk.Query.limit(100)];
+    const itemVar = anchorClaimPattern.subject;
+    const anchorPropId = anchorClaimPattern.predicate.replace('claim:', '');
 
-    const claimsResponse = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, queries);
+    const queries = [sdk.Query.equal('property', anchorPropId), sdk.Query.limit(100)];
+
+    let claimsResponse;
+    try {
+        claimsResponse = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, queries);
+    } catch (e) {
+        throw new Error(`Failed to fetch anchor claims: ${e.message}`);
+    }
+
     let results = [];
-    const subjectVar = anchorPattern.subject;
 
-    for (const document of claimsResponse.documents) {
-        let isValid = true;
-        let resultRow = {};
-        const data = typeof document.data === 'string' ? JSON.parse(document.data) : (document.data || document);
+    for (const anchorDoc of claimsResponse.documents) {
+        const data = typeof anchorDoc.data === 'string' ? JSON.parse(anchorDoc.data) : (anchorDoc.data || anchorDoc);
         const subjectId = data.subject || data.$id;
-        const claimId = document.$id;
-        const claimValueRaw = data.value_raw || data.value; // some claims store value inside relation or raw
+        const claimValueRaw = data.value_raw || data.value;
+        const claimValueRelation = data.value_relation?.$id || data.value_relation;
 
-        // Filter targetValue locally since 'value' isn't a searchable table attribute
-        if (targetValue && claimValueRaw !== targetValue && data.value_relation?.$id !== targetValue && data.value_relation !== targetValue) {
-            continue;
-        }
-
-        if (statementVar && parsed.variables.includes(statementVar)) resultRow[statementVar] = claimId;
-
-        const valueVarPattern = parsed.wherePattern.find(p => p.subject === statementVar && p.predicate === 'value:' && p.object.startsWith('?'));
-        if (valueVarPattern && parsed.variables.includes(valueVarPattern.object)) resultRow[valueVarPattern.object] = claimValueRaw;
-
-        for (const pattern of parsed.wherePattern) {
-            if (pattern === anchorPattern) continue;
-            if (pattern.subject === statementVar && pattern.predicate === 'value:') continue;
-
-            if (pattern.subject === statementVar && pattern.predicate.startsWith('qual:')) {
-                const qualPropId = pattern.predicate.replace('qual:', '');
-                const qualVar = pattern.object;
-                try {
-                    const qualResponse = await databases.listDocuments(DATABASE_ID, TABLES.QUALIFIERS, [
-                        sdk.Query.equal('claim', claimId), sdk.Query.equal('property', qualPropId), sdk.Query.limit(1)
-                    ]);
-                    if (qualResponse.documents.length > 0) {
-                        const qdata = typeof qualResponse.documents[0].data === 'string' ? JSON.parse(qualResponse.documents[0].data) : (qualResponse.documents[0].data || qualResponse.documents[0]);
-                        if (parsed.variables.includes(qualVar) || parsed.variables.includes('*')) resultRow[qualVar] = qdata.value;
-                    } else { isValid = false; break; }
-                } catch (err) {
-                    if (log) log(`SPARQL QUALIFIER ERROR for claimId ${JSON.stringify(claimId)}: ${err.message}`);
-                    isValid = false; break;
-                }
-            }
-            else if (pattern.subject === statementVar && pattern.predicate.startsWith('ref:')) {
-                const refPropId = pattern.predicate.replace('ref:', '');
-                const refVar = pattern.object;
-                try {
-                    const refResponse = await databases.listDocuments(DATABASE_ID, TABLES.REFERENCES, [
-                        sdk.Query.equal('claim', claimId), sdk.Query.equal('property', refPropId), sdk.Query.limit(1)
-                    ]);
-                    if (refResponse.documents.length > 0) {
-                        const rdata = typeof refResponse.documents[0].data === 'string' ? JSON.parse(refResponse.documents[0].data) : (refResponse.documents[0].data || refResponse.documents[0]);
-                        if (parsed.variables.includes(refVar) || parsed.variables.includes('*')) resultRow[refVar] = rdata.value;
-                    } else { isValid = false; break; }
-                } catch (err) {
-                    if (log) log(`SPARQL REFERENCE ERROR for claimId ${JSON.stringify(claimId)}: ${err.message}`);
-                    isValid = false; break;
-                }
+        if (anchorTargetValue) {
+            if (claimValueRaw !== anchorTargetValue && claimValueRelation !== anchorTargetValue) {
+                continue;
             }
         }
 
+        const env = {
+            [itemVar]: subjectId,
+            [anchorClaimPattern.object]: {
+                id: anchorDoc.$id,
+                value: claimValueRaw,
+                relation: claimValueRelation
+            }
+        };
+
+        let isValid = true;
+
+        // Satisfy other claims
+        for (const cp of claimPatterns) {
+            if (cp === anchorClaimPattern) continue;
+            if (cp.subject !== itemVar) continue; // Only joining on the main subject for now
+
+            const propId = cp.predicate.replace('claim:', '');
+
+            try {
+                const otherClaims = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, [
+                    sdk.Query.equal('subject', typeof subjectId === 'string' ? subjectId : subjectId.$id),
+                    sdk.Query.equal('property', propId),
+                    sdk.Query.limit(1)
+                ]);
+
+                if (otherClaims.documents.length === 0) {
+                    isValid = false; break;
+                }
+
+                const odata = typeof otherClaims.documents[0].data === 'string' ? JSON.parse(otherClaims.documents[0].data) : (otherClaims.documents[0].data || otherClaims.documents[0]);
+                env[cp.object] = {
+                    id: otherClaims.documents[0].$id,
+                    value: odata.value_raw || odata.value,
+                    relation: odata.value_relation?.$id || odata.value_relation
+                };
+            } catch (e) {
+                if (log) log(`Error fetching claim ${propId}: ${e.message}`);
+                isValid = false; break;
+            }
+        }
         if (!isValid) continue;
 
+        let resultRow = {};
+
+        // Satisfy values
+        for (const vp of valuePatterns) {
+            if (vp === anchorValuePattern) continue;
+            const claimCtx = env[vp.subject];
+            if (!claimCtx) { isValid = false; break; }
+
+            if (vp.object.startsWith('?')) {
+                resultRow[vp.object] = claimCtx.value;
+            } else {
+                const reqVal = vp.object.replace('item:', '').replace(/['"]/g, '');
+                if (claimCtx.value !== reqVal && claimCtx.relation !== reqVal) {
+                    isValid = false; break;
+                }
+            }
+        }
+        if (!isValid) continue;
+
+        // Satisfy qualifiers
+        for (const qp of qualPatterns) {
+            const claimCtx = env[qp.subject];
+            if (!claimCtx) { isValid = false; break; }
+
+            const qualPropId = qp.predicate.replace('qual:', '');
+            try {
+                const qualResponse = await databases.listDocuments(DATABASE_ID, TABLES.QUALIFIERS, [
+                    sdk.Query.equal('claim', claimCtx.id), sdk.Query.equal('property', qualPropId), sdk.Query.limit(1)
+                ]);
+                if (qualResponse.documents.length === 0) { isValid = false; break; }
+                const qdata = typeof qualResponse.documents[0].data === 'string' ? JSON.parse(qualResponse.documents[0].data) : (qualResponse.documents[0].data || qualResponse.documents[0]);
+
+                if (qp.object.startsWith('?')) {
+                    resultRow[qp.object] = qdata.value;
+                } else {
+                    const reqVal = qp.object.replace('item:', '').replace(/['"]/g, '');
+                    if (qdata.value !== reqVal) { isValid = false; break; }
+                }
+            } catch (err) {
+                isValid = false; break;
+            }
+        }
+        if (!isValid) continue;
+
+        // Satisfy references
+        for (const rp of refPatterns) {
+            const claimCtx = env[rp.subject];
+            if (!claimCtx) { isValid = false; break; }
+
+            const refPropId = rp.predicate.replace('ref:', '');
+            try {
+                const refResponse = await databases.listDocuments(DATABASE_ID, TABLES.REFERENCES, [
+                    sdk.Query.equal('claim', claimCtx.id), sdk.Query.equal('property', refPropId), sdk.Query.limit(1)
+                ]);
+                if (refResponse.documents.length === 0) { isValid = false; break; }
+                const rdata = typeof refResponse.documents[0].data === 'string' ? JSON.parse(refResponse.documents[0].data) : (refResponse.documents[0].data || refResponse.documents[0]);
+
+                if (rp.object.startsWith('?')) {
+                    resultRow[rp.object] = rdata.value;
+                } else {
+                    const reqVal = rp.object.replace('item:', '').replace(/['"]/g, '');
+                    if (rdata.value !== reqVal) { isValid = false; break; }
+                }
+            } catch (err) {
+                isValid = false; break;
+            }
+        }
+        if (!isValid) continue;
+
+        // Finalize row variables
         if (parsed.variables.includes('?label') || parsed.variables.includes('*')) {
             try {
                 const entityRow = await databases.getDocument(DATABASE_ID, TABLES.ENTITIES, typeof subjectId === 'string' ? subjectId : subjectId.$id, [
@@ -535,8 +613,9 @@ async function executeSparql(parsed, databases, log) {
         }
 
         for (const v of parsed.variables) {
-            if (v === subjectVar) resultRow[subjectVar] = subjectId;
-            if (resultRow[v] === undefined && v !== '*') resultRow[v] = null;
+            if (v === itemVar) resultRow[v] = typeof subjectId === 'string' ? subjectId : subjectId.$id;
+            else if (env[v] && typeof env[v] === 'object') resultRow[v] = env[v].id;
+            else if (resultRow[v] === undefined && v !== '*') resultRow[v] = null;
         }
 
         results.push(resultRow);
