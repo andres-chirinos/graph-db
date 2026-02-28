@@ -484,7 +484,18 @@ async function executeSparql(parsed, databases, log) {
     const itemVar = anchorClaimPattern.subject;
     const anchorPropId = anchorClaimPattern.predicate.replace('claim:', '');
 
-    const queries = [sdk.Query.equal('property', anchorPropId), sdk.Query.limit(100)];
+    let queryLimit = parsed.limit || 100;
+    let queryOffset = parsed.offset || 0;
+
+    // Fetch limits
+    const fetchLimit = Math.min(Math.max((queryLimit + queryOffset) * 2, 100), 5000);
+    const queries = [sdk.Query.equal('property', anchorPropId), sdk.Query.limit(fetchLimit)];
+
+    if (anchorTargetValue && (queryOffset + queryLimit) <= 5000) {
+        // If we are looking for an exact target value on the anchor, we can pass offset directly to DB
+        // But since Appwrite search on `value_raw` isn't direct in our current index setup without warning,
+        // we let the manual filter catch it unless we are sure it's an indexed field.
+    }
 
     let claimsResponse;
     try {
@@ -494,8 +505,11 @@ async function executeSparql(parsed, databases, log) {
     }
 
     let results = [];
+    let yieldedCount = 0;
 
     for (const anchorDoc of claimsResponse.documents) {
+        if (results.length >= queryLimit) break;
+
         const data = typeof anchorDoc.data === 'string' ? JSON.parse(anchorDoc.data) : (anchorDoc.data || anchorDoc);
         const subjectId = data.subject || data.$id;
         const claimValueRaw = data.value_raw || data.value;
@@ -635,6 +649,12 @@ async function executeSparql(parsed, databases, log) {
             if (v === itemVar) resultRow[v] = typeof subjectId === 'string' ? subjectId : subjectId.$id;
             else if (env[v] && typeof env[v] === 'object') resultRow[v] = env[v].id;
             else if (resultRow[v] === undefined && v !== '*') resultRow[v] = null;
+        }
+
+        // Apply Offset
+        yieldedCount++;
+        if (yieldedCount <= queryOffset) {
+            continue; // Skip this row as it falls before the requested offset
         }
 
         results.push(resultRow);

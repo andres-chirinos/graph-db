@@ -10,6 +10,8 @@ class SparqlParser {
             type: null, // e.g. 'SELECT'
             variables: [], // e.g. ['?item', '?label']
             wherePattern: [], // Array of triple objects: { subject, predicate, object }
+            limit: null, // e.g. 100
+            offset: null // e.g. 20
         };
     }
 
@@ -21,6 +23,18 @@ class SparqlParser {
         }
 
         this.parsed.wherePattern = this._extractWhereClauses();
+
+        // Extract limit
+        const limitMatch = this.rawQuery.match(/LIMIT\s+(\d+)/i);
+        if (limitMatch) {
+            this.parsed.limit = parseInt(limitMatch[1], 10);
+        }
+
+        // Extract offset
+        const offsetMatch = this.rawQuery.match(/OFFSET\s+(\d+)/i);
+        if (offsetMatch) {
+            this.parsed.offset = parseInt(offsetMatch[1], 10);
+        }
 
         return this.parsed;
     }
