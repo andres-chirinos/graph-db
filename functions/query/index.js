@@ -632,6 +632,12 @@ async function executeSparql(parsed, databases, log) {
         }
         if (!isValid) continue;
 
+        // Apply Offset early to avoid expensive Entity queries
+        yieldedCount++;
+        if (yieldedCount <= queryOffset) {
+            continue; // Skip this row as it falls before the requested offset
+        }
+
         // Finalize row variables
         if (parsed.variables.includes('?label') || parsed.variables.includes('*')) {
             try {
@@ -649,12 +655,6 @@ async function executeSparql(parsed, databases, log) {
             if (v === itemVar) resultRow[v] = typeof subjectId === 'string' ? subjectId : subjectId.$id;
             else if (env[v] && typeof env[v] === 'object') resultRow[v] = env[v].id;
             else if (resultRow[v] === undefined && v !== '*') resultRow[v] = null;
-        }
-
-        // Apply Offset
-        yieldedCount++;
-        if (yieldedCount <= queryOffset) {
-            continue; // Skip this row as it falls before the requested offset
         }
 
         results.push(resultRow);
