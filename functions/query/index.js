@@ -439,13 +439,32 @@ async function executeSparql(parsed, databases, log) {
     if (parsed.type !== 'SELECT') throw new Error('Only SELECT queries are supported in this engine version.');
     if (parsed.wherePattern.length === 0) throw new Error('WHERE clause cannot be empty.');
 
+    // 0. Pre-process concise syntax (e.g. `?item prop:Pxx item:Qyy .` -> full graph equivalents)
+    let autoVarCount = 0;
+    const normalizedPatterns = [];
+    for (const p of parsed.wherePattern) {
+        if (p.predicate.startsWith('prop:')) {
+            const propId = p.predicate.replace('prop:', '');
+            const autoVar = `?_auto_stmt${autoVarCount++}`;
+            normalizedPatterns.push({ subject: p.subject, predicate: `claim:${propId}`, object: autoVar });
+            normalizedPatterns.push({ subject: autoVar, predicate: 'value:', object: p.object });
+        } else if (p.predicate.startsWith('claim:') && !p.object.startsWith('?')) {
+            const autoVar = `?_auto_stmt${autoVarCount++}`;
+            normalizedPatterns.push({ subject: p.subject, predicate: p.predicate, object: autoVar });
+            normalizedPatterns.push({ subject: autoVar, predicate: 'value:', object: p.object });
+        } else {
+            normalizedPatterns.push(p);
+        }
+    }
+    parsed.wherePattern = normalizedPatterns;
+
     // 1. Group patterns by type
     const claimPatterns = parsed.wherePattern.filter(p => p.predicate.startsWith('claim:') && p.object.startsWith('?'));
     const valuePatterns = parsed.wherePattern.filter(p => p.predicate === 'value:');
     const qualPatterns = parsed.wherePattern.filter(p => p.predicate.startsWith('qual:'));
     const refPatterns = parsed.wherePattern.filter(p => p.predicate.startsWith('ref:'));
 
-    if (claimPatterns.length === 0) throw new Error('At least one `claim:Pxx ?stmt` predicate is required. Prop:Pxx shorthand is no longer supported, use claim:Pxx.');
+    if (claimPatterns.length === 0) throw new Error('At least one claim predicate is required to anchor the search.');
 
     // Find the best anchor claim (one that has an exact value match)
     let anchorClaimPattern = claimPatterns[0];
