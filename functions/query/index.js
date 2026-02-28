@@ -127,6 +127,7 @@ async function searchEntitiesText(databases, searchTerm, limit = 20, offset = 0)
     const queries = [
         sdk.Query.limit(limit * 3),
         sdk.Query.offset(offset),
+        sdk.Query.select(["$id", "label", "description", "aliases"]) // Prevent fetching claims relation
     ];
 
     if (searchTerm && searchTerm.trim()) {
@@ -518,7 +519,9 @@ async function executeSparql(parsed, databases, log) {
 
         if (parsed.variables.includes('?label') || parsed.variables.includes('*')) {
             try {
-                const entityRow = await databases.getDocument(DATABASE_ID, TABLES.ENTITIES, typeof subjectId === 'string' ? subjectId : subjectId.$id);
+                const entityRow = await databases.getDocument(DATABASE_ID, TABLES.ENTITIES, typeof subjectId === 'string' ? subjectId : subjectId.$id, [
+                    sdk.Query.select(["$id", "label", "name"])
+                ]);
                 const entityData = typeof entityRow.data === 'string' ? JSON.parse(entityRow.data) : (entityRow.data || entityRow);
                 resultRow['?label'] = entityData.label || entityData.name || null;
             } catch {
@@ -583,7 +586,9 @@ module.exports = async ({ req, res, log, error }) => {
                 const entities = [];
                 for (const id of pagedIds) {
                     try {
-                        const entity = await databases.getDocument(DATABASE_ID, TABLES.ENTITIES, id);
+                        const entity = await databases.getDocument(DATABASE_ID, TABLES.ENTITIES, id, [
+                            sdk.Query.select(["$id", "label", "description", "aliases", "$createdAt", "$updatedAt"])
+                        ]);
                         const data = typeof entity.data === 'string' ? JSON.parse(entity.data) : (entity.data || entity);
                         entities.push({ ...entity, ...data });
                     } catch (e) {
