@@ -88,11 +88,11 @@ function parseSearchQuery(query) {
  * @param {function} log Optional logging function.
  * @returns {Promise<Array<object>>} List of matching entities.
  */
-async function searchEntitiesBySchema(databases, schema, limit = 20, offset = 0, log) {
+async function searchEntitiesBySchema(databases, schema, limit = 20, offset = 0, log, checkTimeout) {
     const mainStart = Date.now();
     if (log) log(`[SchemaSearch] Starting search with schema: ${JSON.stringify(schema)}`);
 
-    const entityIds = await _findEntityIds(databases, schema, limit + offset, log);
+    const entityIds = await _findEntityIds(databases, schema, limit + offset, log, checkTimeout);
 
     if (entityIds.length === 0) {
         if (log) log(`[SchemaSearch] No entity IDs found. Search completed in ${Date.now() - mainStart}ms.`);
@@ -263,9 +263,10 @@ async function searchEntitiesByPropertyValue(databases, propertyId, value, limit
     return Array.from(entityIds).slice(0, limit).map(id => ({ $id: id }));
 }
 
-async function getFullClaim(databases, claimId, log) {
+async function getFullClaim(databases, claimId, log, checkTimeout) {
     const t0 = Date.now();
     try {
+        if (checkTimeout) checkTimeout();
         const claimDoc = await databases.getDocument(DATABASE_ID, TABLES.CLAIMS, claimId);
         const claim = typeof claimDoc.data === 'string' ? JSON.parse(claimDoc.data) : (claimDoc.data || claimDoc);
 
@@ -333,7 +334,7 @@ function _claimMatchesSchemaCondition(claim, claimSchema) {
     return true;
 }
 
-async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50, offset = 0, log) {
+async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50, offset = 0, log, checkTimeout) {
     if (log) log(`[_searchClaimsBySchemaCondition] Started for property: ${claimSchema.propertyId}`);
     const matchingSubjectIds = new Set();
     const pageSize = 100;
@@ -341,6 +342,7 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
     let hasMoreClaims = true;
 
     while (hasMoreClaims && matchingSubjectIds.size < limit) {
+        if (checkTimeout) checkTimeout();
         const loopT0 = Date.now();
         const claimsResult = await databases.listDocuments(DATABASE_ID, TABLES.CLAIMS, [
             sdk.Query.equal("property", claimSchema.propertyId),
@@ -359,7 +361,7 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
             if ((Array.isArray(claimSchema.qualifiers) && claimSchema.qualifiers.length > 0) ||
                 (Array.isArray(claimSchema.references) && claimSchema.references.length > 0)) {
 
-                const fullClaim = await getFullClaim(databases, claimDoc.$id, log);
+                const fullClaim = await getFullClaim(databases, claimDoc.$id, log, checkTimeout);
                 if (fullClaim && _claimMatchesSchemaCondition(fullClaim, claimSchema)) {
                     const subjectId = fullClaim.subject?.$id || fullClaim.subject;
                     if (subjectId) {
@@ -386,7 +388,7 @@ async function _searchClaimsBySchemaCondition(databases, claimSchema, limit = 50
 }
 
 // Helper to recursively find entities matching the schema condition
-async function _findEntityIds(databases, schema, limit, log) {
+async function _findEntityIds(databases, schema, limit, log, checkTimeout) {
     const t0 = Date.now();
     if (log) log(`[_findEntityIds] Started lookup with schema logic ${schema.logic}`);
     const { text, properties = [], claims = [], groups = [], logic = "AND" } = schema;
@@ -394,6 +396,7 @@ async function _findEntityIds(databases, schema, limit, log) {
     let firstConditionProcessed = false;
 
     if (text) {
+        if (checkTimeout) checkTimeout();
         const textMatches = await searchEntitiesText(databases, text, limit * 5, 0);
         const ids = textMatches.map(entity => entity.$id);
         candidateEntityIds = new Set(ids);
@@ -441,7 +444,8 @@ async function _findEntityIds(databases, schema, limit, log) {
         let firstClaim = true;
 
         for (const claimCondition of claims) {
-            const currentClaimSubjectIds = await _searchClaimsBySchemaCondition(databases, claimCondition, limit * 5, 0, log);
+            if (checkTimeout) checkTimeout();
+            const currentClaimSubjectIds = await _searchClaimsBySchemaCondition(databases, claimCondition, limit * 5, 0, log, checkTimeout);
             claimMatchedIds = mergeIds(claimMatchedIds, currentClaimSubjectIds, firstClaim);
             firstClaim = false;
         }
@@ -457,7 +461,8 @@ async function _findEntityIds(databases, schema, limit, log) {
         let firstGroup = true;
 
         for (const groupSchema of groups) {
-            const matchedIds = await _findEntityIds(databases, groupSchema, limit, log);
+            if (checkTimeout) checkTimeout();
+            const matchedIds = await _findEntityIds(databases, groupSchema, limit, log, checkTimeout);
             const currentGroupIds = new Set(matchedIds);
             groupMatchedIds = mergeIds(groupMatchedIds, currentGroupIds, firstGroup);
             firstGroup = false;
@@ -481,7 +486,7 @@ async function _findEntityIds(databases, schema, limit, log) {
 // ----------------------------------------------------- //
 // Legacy SPARQL Execution Logic
 // ----------------------------------------------------- //
-async function executeSparql(parsed, databases, log) {
+async function executeSparql(parsed, databases, log, checkTimeout) {
     const startTime = Date.now();
     if (log) log(`[SPARQL] Starting execution. Parsed patterns: ${parsed.wherePattern.length}`);
 
@@ -564,6 +569,8 @@ async function executeSparql(parsed, databases, log) {
     let loopStartTime = Date.now();
 
     for (const anchorDoc of claimsResponse.documents) {
+        if (checkTimeout) checkTimeout();
+
         if (results.length >= queryLimit) {
             if (log) log(`[SPARQL] Reached requested limit of ${queryLimit}. Breaking loop.`);
             break;
@@ -743,6 +750,15 @@ module.exports = async ({ req, res, log, error }) => {
         }
 
         if (req.method === 'POST') {
+            const reqStart = Date.now();
+            const checkTimeout = () => {
+                if (Date.now() - reqStart > 13500) {
+                    const err = new Error("INTERNAL_TIMEOUT: Function approached 14s limit. Bailing out gracefully to flush logs.");
+                    err.isTimeout = true;
+                    throw err;
+                }
+            };
+
             let body = req.body;
             if (typeof body === 'string') {
                 body = JSON.parse(body);
@@ -766,23 +782,30 @@ module.exports = async ({ req, res, log, error }) => {
                 const limit = body.limit || 50;
                 const offset = body.offset || 0;
 
-                const allIds = await _findEntityIds(databases, body.schema, limit + offset + 50, log);
-                const pagedIds = allIds.slice(offset, offset + limit);
+                try {
+                    const allIds = await _findEntityIds(databases, body.schema, limit + offset + 50, log, checkTimeout);
+                    const pagedIds = allIds.slice(offset, offset + limit);
 
-                const entities = [];
-                for (const id of pagedIds) {
-                    try {
-                        const entity = await databases.getDocument(DATABASE_ID, TABLES.ENTITIES, id, [
-                            sdk.Query.select(["$id", "label", "description", "aliases", "$createdAt", "$updatedAt"])
-                        ]);
-                        const data = typeof entity.data === 'string' ? JSON.parse(entity.data) : (entity.data || entity);
-                        entities.push({ ...entity, ...data });
-                    } catch (e) {
-                        log(`Entidad ${id} no encontrada`);
+                    const entities = [];
+                    for (const id of pagedIds) {
+                        if (checkTimeout) checkTimeout();
+                        try {
+                            const entity = await databases.getDocument(DATABASE_ID, TABLES.ENTITIES, id, [
+                                sdk.Query.select(["$id", "label", "description", "aliases", "$createdAt", "$updatedAt"])
+                            ]);
+                            const data = typeof entity.data === 'string' ? JSON.parse(entity.data) : (entity.data || entity);
+                            entities.push({ ...entity, ...data });
+                        } catch (e) {
+                            log(`Entidad ${id} no encontrada`);
+                        }
                     }
-                }
 
-                return res.json({ results: entities }, 200);
+                    return res.json({ results: entities }, 200);
+                } catch (e) {
+                    error(`Error in Schema Search: ${e.message}`);
+                    if (e.isTimeout) return res.json({ error: e.message, timeout: true }, 504);
+                    return res.json({ error: e.message }, 500);
+                }
             }
 
             // Path 2: SPARQL Query
@@ -792,8 +815,14 @@ module.exports = async ({ req, res, log, error }) => {
                 const parsed = parser.parse();
                 log("Parsed Query: " + JSON.stringify(parsed));
 
-                const results = await executeSparql(parsed, databases, log);
-                return res.json({ results: { bindings: results } }, 200);
+                try {
+                    const results = await executeSparql(parsed, databases, log, checkTimeout);
+                    return res.json({ results: { bindings: results } }, 200);
+                } catch (e) {
+                    error(`Error in SPARQL Execution: ${e.message}`);
+                    if (e.isTimeout) return res.json({ error: e.message, timeout: true }, 504);
+                    return res.json({ error: e.message }, 500);
+                }
             }
 
             return res.json({ error: 'Missing `schema` or `query` parameter in request body' }, 400);
